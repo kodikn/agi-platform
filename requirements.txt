@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg[binary]
+pydantic
+qdrant-client
+neo4j
+redis
+httpx

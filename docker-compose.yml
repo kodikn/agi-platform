@@ -1,0 +1,17 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+
+  postgres:
+    image: pgvector/pgvector:pg17
+
+  qdrant:
+    image: qdrant/qdrant
+
+  redis:
+    image: redis:7
+
+  neo4j:
+    image: neo4j:latest

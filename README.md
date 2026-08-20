@@ -49,7 +49,7 @@ The orchestrator adopts strengths from leading open-source agent projects: LangG
 
 ## Production endpoints
 
-- `GET /ready` verifies every level has implementation, API, schema, metrics, and security controls.
+- `GET /ready` reports an honest RED/YELLOW/GREEN production-control matrix; the current prototype intentionally reports `not-ready` until critical durability, authorization, dependency, and sandbox controls are implemented.
 - `GET /metrics` exposes Prometheus-compatible metrics.
 - `GET /security/policy` reports the active API-key and rate-limit policy.
 

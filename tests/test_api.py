@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 
 client = TestClient(app)
+AUTH = {"X-API-Key": "test-admin-key", "X-Tenant-ID": "tenant-a"}
 
 
 def test_health():
@@ -20,15 +21,15 @@ def test_architecture_level_catalog():
 
 
 def test_memory_store_and_search():
-    stored = client.post("/memory/store", json={"content": "LangGraph orchestrates agent workflows", "memory_type": "semantic"})
+    stored = client.post("/memory/store", headers=AUTH, json={"content": "LangGraph orchestrates agent workflows", "memory_type": "semantic"})
     assert stored.status_code == 200
-    found = client.post("/memory/search", json={"query": "LangGraph"})
+    found = client.post("/memory/search", headers=AUTH, json={"query": "LangGraph"})
     assert found.status_code == 200
     assert found.json()["results"][0]["content"] == "LangGraph orchestrates agent workflows"
 
 
 def test_code_analysis_flags_eval():
-    response = client.post("/analyze/code", json={"code": "eval(user_input)"})
+    response = client.post("/analyze/code", headers=AUTH, json={"code": "eval(user_input)"})
     assert response.status_code == 200
     assert response.json()["findings"][0]["severity"] == "high"
 
@@ -43,7 +44,7 @@ def test_competitive_advantages_endpoint_lists_adopted_strengths():
 
 
 def test_orchestrator_includes_best_of_breed_capabilities():
-    response = client.post("/orchestrate", json={"task": "ship production agent platform"})
+    response = client.post("/orchestrate", headers=AUTH, json={"task": "ship production agent platform"})
     assert response.status_code == 200
     body = response.json()
     assert body["graph"]["recovery_enabled"] is True
@@ -77,11 +78,11 @@ def test_mcp_manifest_lists_approved_tools():
 
 
 def test_orchestrator_executes_and_recovers_persistent_workflow():
-    planned = client.post("/orchestrate", json={"task": "deliver executable workflow", "agents": ["architect", "implementer"]})
+    planned = client.post("/orchestrate", headers=AUTH, json={"task": "deliver executable workflow", "agents": ["architect", "implementer"]})
     assert planned.status_code == 200
     checkpoint = planned.json()["checkpoint"]
 
-    executed = client.post(f"/orchestrate/{checkpoint}/execute")
+    executed = client.post(f"/orchestrate/{checkpoint}/execute", headers=AUTH)
     assert executed.status_code == 200
     body = executed.json()
     assert body["status"] == "completed"
@@ -89,7 +90,7 @@ def test_orchestrator_executes_and_recovers_persistent_workflow():
     assert body["events"][-1]["type"] == "workflow.completed"
     assert body["graph"]["state_store"]
 
-    recovered = client.post(f"/orchestrate/{checkpoint}/recover")
+    recovered = client.post(f"/orchestrate/{checkpoint}/recover", headers=AUTH)
     assert recovered.status_code == 200
     assert recovered.json()["status"] == "recovered"
     assert recovered.json()["checkpoint"] == checkpoint

@@ -15,6 +15,8 @@ class Settings:
     qdrant_url: str
     neo4j_uri: str
     redis_url: str
+    redis_required: bool
+    rate_limit_fail_open: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -28,6 +30,8 @@ class Settings:
             qdrant_url=os.getenv("QDRANT_URL", "http://qdrant:6333"),
             neo4j_uri=os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
             redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+            redis_required=os.getenv("AGI_REDIS_REQUIRED", "true").lower() == "true",
+            rate_limit_fail_open=os.getenv("AGI_RATE_LIMIT_FAIL_OPEN", "false").lower() == "true",
         )
 
 

@@ -1,0 +1,2 @@
+# Development override: publishes stateful services on 127.0.0.1 for local tools only.
+services: {}

@@ -17,3 +17,5 @@ os.environ.setdefault(
         {"key": "expired-key", "key_id": "expired", "subject": "expired", "tenant_id": "tenant-a", "roles": ["reader"], "permissions": ["memory.read"], "expires_at": 1},
     ]),
 )
+
+os.environ.setdefault("AGI_REDIS_REQUIRED", "false")

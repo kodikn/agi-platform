@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
+from agi_platform.outbound import SecureHTTPClient
 
 
 @dataclass
@@ -39,10 +39,10 @@ class ChineseResearchHub:
         payload = {"q": text, "source": "zh", "target": "en", "format": "text"}
         if api_key:
             payload["api_key"] = api_key
-        with httpx.Client(timeout=self.timeout_seconds) as client:
-            response = client.post(f"{endpoint.rstrip('/')}/translate", json=payload)
-            response.raise_for_status()
-            return {"text": response.json()["translatedText"], "provider": "libretranslate", "status": "translated"}
+        client = SecureHTTPClient()
+        response = client.post(f"{endpoint.rstrip('/')}/translate", json=payload)
+        response.raise_for_status()
+        return {"text": response.json()["translatedText"], "provider": "libretranslate", "status": "translated"}
 
     @staticmethod
     def _classify(text: str) -> str:

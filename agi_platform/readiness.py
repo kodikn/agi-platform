@@ -44,18 +44,18 @@ class ControlAssessment:
 
 CRITICAL_CONTROLS: dict[int, tuple[ControlAssessment, ...]] = {
     0: (
-        ControlAssessment("provider_resilience", "YELLOW", "LLMCore uses httpx timeouts but lacks retry/circuit-breaker and policy-aware routing.", "Add provider health, retry budget, circuit breaker, cost and policy-aware router.", True),
+        ControlAssessment("provider_resilience", "YELLOW", "LLMCore routes through LLMGateway with retry/backoff, circuit breaker, provider health, fallback, and budget enforcement; production tuning remains deployment-specific.", "Persist full LLM accounting to PostgreSQL and tune provider budgets per tenant.", True),
         ControlAssessment("durable_usage_accounting", "RED", "LLMCore.usage is in-process memory.", "Persist usage/cost records transactionally.", True),
     ),
-    1: (ControlAssessment("durable_memory", "RED", "MemoryLayer.records is an in-process dict.", "Persist canonical memory metadata in Postgres with tenant_id/provenance and vector indexes.", True),),
+    1: (ControlAssessment("durable_memory", "YELLOW", "MemoryLayer persists canonical metadata through SQLAlchemy/PostgreSQL-compatible tables; Qdrant remains an optional vector dependency.", "Add production Qdrant health enforcement and PostgreSQL RLS policies.", True),),
     2: (ControlAssessment("immutable_memory_audit", "RED", "MemoryGuardian audit/reviews/versions are in-process containers.", "Persist immutable audit events and guarded memory versions.", True),),
     3: (ControlAssessment("safe_external_research", "YELLOW", "ResearchLayer has timeouts but no SSRF/size/content-type policy.", "Add SSRF controls, response limits, source policy and evidence persistence.", True),),
     4: (ControlAssessment("translation_provenance", "YELLOW", "ChineseResearchHub keeps original/translated fields but no durable evidence/version model.", "Persist original/translation/evidence records with provider/version metadata.", True),),
     5: (ControlAssessment("analysis_finding_model", "YELLOW", "Analysis findings are deterministic but lack stable finding_id/fingerprint/status persistence.", "Add canonical finding schema, fingerprints, status lifecycle and persistence.", True),),
     6: (ControlAssessment("bounded_repository_indexing", "YELLOW", "GitHubIntelligence fetches repo/contributors with timeout but no pagination/rate-limit checkpointing.", "Add incremental indexing, pagination, content hashes and rate-limit handling.", True),),
-    7: (ControlAssessment("strong_sandbox_isolation", "RED", "SandboxLab still uses subprocess; resource limits help but are not container/microVM isolation.", "Execute untrusted workloads in non-root container/microVM with network/filesystem isolation and escape tests.", True),),
+    7: (ControlAssessment("strong_sandbox_isolation", "YELLOW", "Sandbox policy now declares container/microVM controls and fail-closed local deny rules; local subprocess fallback is still not a production isolation boundary.", "Run production workloads in non-root read-only container or microVM with seccomp/AppArmor and no host mounts.", True),),
     8: (ControlAssessment("durable_graph", "RED", "KnowledgeGraph.nodes/edges are in-process containers.", "Persist graph entities/relationships in Neo4j with tenant constraints and traversal limits.", True),),
-    9: (ControlAssessment("durable_workflow_engine", "YELLOW", "WorkflowStateStore is JSON-file based and lacks concurrency/idempotency/dead-letter semantics.", "Move workflow runs/checkpoints/events to transactional store with locks/idempotency.", True),),
+    9: (ControlAssessment("durable_workflow_engine", "YELLOW", "WorkflowStateStore persists runs/tasks/checkpoints/events in SQL with leases and idempotency keys; full worker side-effect execution is still a later phase.", "Add production worker scheduler and external side-effect execution records.", True),),
     10: (ControlAssessment("approval_governance", "RED", "ArchitectureGovernance decisions/reviews are in-process and low-risk auto-approval lacks scoped approval records.", "Persist ADR records and enforce explicit approval gates for high-risk actions.", True),),
     11: (ControlAssessment("self_improvement_gate", "YELLOW", "SelfImprovementEngine only proposes; no mutation path exists, but no formal approval lifecycle is enforced.", "Model proposal/benchmark/approval/deploy/rollback lifecycle with policy gates.", True),),
 }

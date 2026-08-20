@@ -2,15 +2,58 @@ from __future__ import annotations
 
 import os
 import resource
+import shlex
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
 _ALLOWED_COMMANDS = {"python", "python3", "echo"}
 _SAFE_ENV = {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"}
+_DENIED_TOKENS = (
+    "/var/run/docker.sock",
+    "docker.sock",
+    "169.254.169.254",
+    "metadata.google.internal",
+    "100.100.100.200",
+    "/etc/passwd",
+    "/root",
+    "/home",
+    "/proc/sys",
+    "/sys",
+    "127.0.0.1",
+    "10.0.0.1",
+    "192.168.",
+    "172.16.",
+    "mount",
+    "unshare",
+    "nsenter",
+    "curl",
+    "wget",
+    "nc",
+    "nmap",
+    "ssh",
+)
+
+
+@dataclass(frozen=True)
+class SandboxIsolationProfile:
+    isolation: str = "container-or-microvm-required"
+    non_root: bool = True
+    read_only_rootfs: bool = True
+    ephemeral_workspace: bool = True
+    no_host_mounts: bool = True
+    docker_socket: str = "blocked"
+    dropped_capabilities: tuple[str, ...] = ("ALL",)
+    seccomp: str = "runtime-default"
+    apparmor: str = "runtime-default-if-available"
+    selinux: str = "enforcing-if-available"
+    network_default: str = "disabled"
+    secret_mounts: str = "none"
+
+    def as_dict(self) -> dict:
+        return self.__dict__
 
 
 @dataclass(frozen=True)
@@ -21,11 +64,18 @@ class SandboxPolicy:
     cpu_seconds: int = 2
     memory_bytes: int = 128 * 1024 * 1024
     max_output_bytes: int = 64 * 1024
+    pid_limit: int = 16
+    disk_bytes: int = 16 * 1024 * 1024
     network: str = "host-disabled-by-policy"
+    network_allowlist: frozenset[str] = frozenset()
+    isolation_profile: SandboxIsolationProfile = SandboxIsolationProfile()
 
     def validate(self, command: list[str], timeout_seconds: int) -> int:
         if not command or command[0] not in self.allowed_commands:
             raise ValueError("command is not allowed by sandbox policy")
+        command_text = shlex.join(command)
+        if any(token in command_text for token in _DENIED_TOKENS):
+            raise ValueError("command attempts to access blocked sandbox boundary")
         if timeout_seconds < 1:
             raise ValueError("timeout must be at least 1 second")
         return min(timeout_seconds, self.max_timeout_seconds)
@@ -37,7 +87,11 @@ class SandboxPolicy:
             "cpu_seconds": self.cpu_seconds,
             "memory_bytes": self.memory_bytes,
             "max_output_bytes": self.max_output_bytes,
+            "pid_limit": self.pid_limit,
+            "disk_bytes": self.disk_bytes,
             "network": self.network,
+            "network_allowlist": sorted(self.network_allowlist),
+            "isolation_profile": self.isolation_profile.as_dict(),
         }
 
 
@@ -48,6 +102,8 @@ class SandboxLab:
 
     def execute(self, command: list[str], timeout_seconds: int = 5) -> dict:
         timeout = self.policy.validate(command, timeout_seconds)
+        if command[0] == "python":
+            command = ["python3", *command[1:]]
         started = time.perf_counter()
         with tempfile.TemporaryDirectory(prefix="agi-sandbox-") as workspace:
             workspace_path = Path(workspace)
@@ -72,7 +128,9 @@ class SandboxLab:
                     "timed_out": False,
                     "workspace_cleaned": not workspace_path.exists(),
                     "policy": self.policy.as_dict(),
-                    "metrics": {"runtime_ms": round((time.perf_counter() - started) * 1000, 3)},
+                    "metrics": {
+                        "runtime_ms": round((time.perf_counter() - started) * 1000, 3)
+                    },
                 }
             except subprocess.TimeoutExpired as exc:
                 result = {
@@ -83,19 +141,35 @@ class SandboxLab:
                     "timed_out": True,
                     "workspace_cleaned": not workspace_path.exists(),
                     "policy": self.policy.as_dict(),
-                    "metrics": {"runtime_ms": round((time.perf_counter() - started) * 1000, 3)},
+                    "metrics": {
+                        "runtime_ms": round((time.perf_counter() - started) * 1000, 3)
+                    },
                 }
         result["workspace_cleaned"] = True
         self.runs.append(result)
         return result
 
     def capability_check(self) -> dict:
+        profile = self.policy.isolation_profile.as_dict()
         result = self.execute(["echo", "sandbox-ready"], timeout_seconds=1)
-        return {"status": "ready" if result["stdout"] == "sandbox-ready\n" else "not-ready", "result": result}
+        return {
+            "status": "ready" if result["stdout"] == "sandbox-ready\n" else "not-ready",
+            "result": result,
+            "production_isolation": profile,
+        }
 
     def _apply_process_limits(self) -> None:
         os.setsid()
-        resource.setrlimit(resource.RLIMIT_CPU, (self.policy.cpu_seconds, self.policy.cpu_seconds))
-        resource.setrlimit(resource.RLIMIT_AS, (self.policy.memory_bytes, self.policy.memory_bytes))
+        resource.setrlimit(
+            resource.RLIMIT_CPU, (self.policy.cpu_seconds, self.policy.cpu_seconds)
+        )
+        resource.setrlimit(
+            resource.RLIMIT_AS, (self.policy.memory_bytes, self.policy.memory_bytes)
+        )
+        resource.setrlimit(
+            resource.RLIMIT_FSIZE, (self.policy.disk_bytes, self.policy.disk_bytes)
+        )
         resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
-        resource.setrlimit(resource.RLIMIT_NPROC, (16, 16))
+        resource.setrlimit(
+            resource.RLIMIT_NPROC, (self.policy.pid_limit, self.policy.pid_limit)
+        )

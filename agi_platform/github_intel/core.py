@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+from agi_platform.outbound import OutboundPolicy, SecureHTTPClient
 
 
 @dataclass
@@ -23,11 +23,11 @@ class GitHubIntelligence:
         token = os.getenv("GITHUB_TOKEN")
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        with httpx.Client(timeout=self.timeout_seconds, headers=headers) as client:
-            repo_response = client.get(f"https://api.github.com/repos/{full_name}")
-            repo_response.raise_for_status()
-            contributors_response = client.get(f"https://api.github.com/repos/{full_name}/contributors", params={"per_page": 10})
-            contributors_response.raise_for_status()
+        client = SecureHTTPClient(OutboundPolicy(allowed_domains=frozenset({"api.github.com"})))
+        repo_response = client.get(f"https://api.github.com/repos/{full_name}", headers=headers)
+        repo_response.raise_for_status()
+        contributors_response = client.get(f"https://api.github.com/repos/{full_name}/contributors", params={"per_page": 10}, headers=headers)
+        contributors_response.raise_for_status()
         repo = repo_response.json()
         record = {
             "full_name": repo["full_name"],

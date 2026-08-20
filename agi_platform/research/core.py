@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from agi_platform.outbound import OutboundPolicy, SecureHTTPClient
+
 
 @dataclass
 class ResearchLayer:
@@ -17,12 +19,12 @@ class ResearchLayer:
         sources = sources or ["github", "osv"]
         evidence: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
-        with httpx.Client(timeout=self.timeout_seconds) as client:
-            for source in sources:
-                try:
-                    evidence.extend(self._collect_source(client, source, query))
-                except httpx.HTTPError as exc:
-                    errors.append({"source": source, "error": str(exc)})
+        client = SecureHTTPClient(OutboundPolicy(allowed_domains=frozenset({"api.github.com", "api.osv.dev"})))
+        for source in sources:
+            try:
+                evidence.extend(self._collect_source(client, source, query))
+            except (httpx.HTTPError, ValueError) as exc:
+                errors.append({"source": source, "error": str(exc)})
         iocs = sorted(set(re.findall(r"(?:\d{1,3}\.){3}\d{1,3}|[a-fA-F0-9]{32,64}|CVE-\d{4}-\d+", query, flags=re.IGNORECASE)))
         trust_score = round(sum(item["trust_score"] for item in evidence) / len(evidence), 3) if evidence else 0.0
         return {"query": query, "evidence": evidence, "iocs": iocs, "trust_score": trust_score, "errors": errors}
@@ -33,7 +35,7 @@ class ResearchLayer:
         self.reports.append(report)
         return report
 
-    def _collect_source(self, client: httpx.Client, source: str, query: str) -> list[dict[str, Any]]:
+    def _collect_source(self, client: SecureHTTPClient, source: str, query: str) -> list[dict[str, Any]]:
         if source == "github":
             headers = {"Accept": "application/vnd.github+json"}
             token = os.getenv("GITHUB_TOKEN")

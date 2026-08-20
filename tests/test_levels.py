@@ -57,7 +57,10 @@ def test_level_5_and_6_analysis_and_github(monkeypatch):
 def test_level_7_sandbox_policy_and_execution():
     executed = client.post("/sandbox/execute", json={"command": ["echo", "safe"]})
     assert executed.status_code == 200
-    assert executed.json()["stdout"] == "safe\n"
+    body = executed.json()
+    assert body["stdout"] == "safe\n"
+    assert body["policy"]["memory_bytes"] > 0
+    assert body["policy"]["network"] == "host-disabled-by-policy"
     blocked = client.post("/sandbox/execute", json={"command": ["curl", "https://example.com"]})
     assert blocked.status_code == 403
 

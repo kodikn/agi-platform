@@ -4,8 +4,8 @@ The platform now exposes runtime production controls shared by every level.
 
 ## Controls
 
-- `GET /ready` validates that all twelve levels have importable implementation modules, API surfaces, database ownership, observability metrics, and security controls.
-- `GET /architecture/readiness` returns the per-level readiness matrix.
+- `GET /ready` reports an honest RED/YELLOW/GREEN matrix that combines implementation/catalog checks with critical production-control assessments; it must not be treated as GREEN until durable state, authorization, dependency checks, and sandbox isolation are complete.
+- `GET /architecture/readiness` returns the same per-level readiness matrix for architecture inspection.
 - `GET /metrics` exports Prometheus-compatible counters and latency summaries from executed level operations.
 - `GET /security/policy` exposes the active API-key and rate-limit policy without disclosing secrets.
 - The API middleware applies rate limiting and security headers to every response.
@@ -46,7 +46,7 @@ When an integration is not configured or a remote API is unavailable, the API re
 - Увімкніть readiness, liveness і startup probes для API deployment.
 - Задайте CPU/memory requests і limits для кожного container.
 - Запускайте containers як non-root там, де це можливо, і drop unnecessary Linux capabilities.
-- Підтвердіть, що `/ready` повертає `ready` лише після успішного import усіх level implementations і required dependencies.
+- Підтвердіть, що `/ready` повертає `ready` лише після успішного import усіх level implementations і required dependencies; для production також додайте dependency та capability probes, які виконують реальні операції проти Postgres, Redis, Neo4j, Qdrant і sandbox runtime.
 - Підтвердіть, що `/live` лишається lightweight і не залежить від databases або remote providers.
 - Налаштуйте dashboards і alerts з `/metrics` перед увімкненням production traffic.
 - Зафіксуйте database migrations і перевірте rollback/restore procedures перед deployment.

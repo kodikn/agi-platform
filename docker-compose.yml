@@ -5,7 +5,7 @@ services:
       - "8000:8000"
     environment:
       AGI_ENV: production
-      DATABASE_URL: postgresql://agi:agi@postgres:5432/agi
+      DATABASE_URL: postgresql://${POSTGRES_USER:-agi}:${POSTGRES_PASSWORD:-agi}@postgres:5432/${POSTGRES_DB:-agi}
       QDRANT_URL: http://qdrant:6333
       NEO4J_URI: bolt://neo4j:7687
       REDIS_URL: redis://redis:6379/0
@@ -28,13 +28,13 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_PASSWORD: agi
-      POSTGRES_USER: agi
-      POSTGRES_DB: agi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agi}
+      POSTGRES_USER: ${POSTGRES_USER:-agi}
+      POSTGRES_DB: ${POSTGRES_DB:-agi}
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agi -d agi"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-agi} -d $${POSTGRES_DB:-agi}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -57,7 +57,7 @@ services:
   neo4j:
     image: neo4j:5
     environment:
-      NEO4J_AUTH: neo4j/agi-platform
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-agi-platform}
     ports:
       - "7474:7474"
       - "7687:7687"

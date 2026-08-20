@@ -1,0 +1,11 @@
+services:
+  api:
+    ports: []
+  postgres:
+    ports: []
+  qdrant:
+    ports: []
+  redis:
+    ports: []
+  neo4j:
+    ports: []

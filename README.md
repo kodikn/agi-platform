@@ -58,3 +58,7 @@ The orchestrator adopts strengths from leading open-source agent projects: LangG
 ```bash
 pytest
 ```
+
+### Compose environments
+
+Use `docker compose --profile dev up --build` for local development. For production-like compose, use `docker compose -f docker-compose.yml -f compose/docker-compose.prod.yml --profile prod up --build`; the production override does not publish PostgreSQL, Redis, Qdrant, or Neo4j ports.

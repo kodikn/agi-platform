@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -5,7 +7,16 @@ from pydantic import BaseModel, Field
 from agi_platform.config import settings
 from agi_platform.readiness import platform_ready
 from agi_platform.security import (
-    RateLimiter,
+    RedisRateLimiter,
+    RateLimitRule,
+    PlatformError,
+    AuthenticationError,
+    AuthorizationError,
+    DependencyError,
+    NotFoundError,
+    ProviderError,
+    RateLimitError,
+    SandboxError,
     apply_production_headers,
     AuditTrail,
     PolicyEngine,
@@ -37,7 +48,8 @@ from agi_platform.services import (
 
 app = FastAPI(title="AGI Platform", version="0.3.0")
 service = PlatformService()
-rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+logger = logging.getLogger(__name__)
+rate_limiter = RedisRateLimiter(settings.redis_url, settings.rate_limit_per_minute, enabled=settings.redis_required)
 api_keys = parse_api_keys(getattr(settings, "api_keys", None), settings.api_key)
 audit_trail = AuditTrail()
 policy_engine = PolicyEngine(audit_trail)
@@ -46,7 +58,7 @@ policy_engine = PolicyEngine(audit_trail)
 def tenant_context(request: Request) -> TenantContext:
     context = getattr(request.state, "tenant_context", None)
     if context is None:
-        raise HTTPException(status_code=403, detail="Tenant context required.")
+        raise AuthorizationError("Tenant context required.")
     return context
 
 
@@ -54,9 +66,22 @@ def tenant_context(request: Request) -> TenantContext:
 async def production_controls(request: Request, call_next):
     rid = request.headers.get("X-Request-ID") or request_id()
     request.state.request_id = rid
-    identity_key = request.headers.get("X-API-Key") or (request.client.host if request.client else "unknown")
-    if not rate_limiter.allow(identity_key):
-        response = canonical_error("rate_limited", "Rate limit exceeded.", rid, 429)
+    client_ip = request.client.host if request.client else "unknown"
+    raw_key = request.headers.get("X-API-Key") or "anonymous"
+    tenant_header = request.headers.get("X-Tenant-ID") or "unknown"
+    rate_rules = [
+        RateLimitRule(f"ip:{client_ip}", settings.rate_limit_per_minute, fail_closed=not settings.rate_limit_fail_open),
+        RateLimitRule(f"api_key:{raw_key}", settings.rate_limit_per_minute, fail_closed=not settings.rate_limit_fail_open),
+        RateLimitRule(f"tenant:{tenant_header}", settings.rate_limit_per_minute * 5, fail_closed=not settings.rate_limit_fail_open),
+    ]
+    expensive = {"/chat": "llm", "/completion": "llm", "/embeddings": "embeddings", "/research/query": "research", "/research/report": "research", "/sandbox/execute": "sandbox", "/github/repositories": "github_indexing"}.get(request.url.path)
+    if expensive:
+        rate_rules.append(RateLimitRule(f"expensive:{expensive}", max(1, settings.rate_limit_per_minute // 4), fail_closed=True))
+    try:
+        rate_limiter.check(rate_rules, rid)
+    except PlatformError as exc:
+        logger.warning("rate_limit_error", extra={"request_id": rid, "code": exc.code, "internal_message": exc.message})
+        response = canonical_error(exc.code, exc.safe_message, rid, exc.status_code)
         response.headers["X-Request-ID"] = rid
         return apply_production_headers(response, settings.service_name)
 
@@ -76,15 +101,25 @@ async def production_controls(request: Request, call_next):
                 if decision.audit_required:
                     audit_trail.record(identity.tenant_id, identity.subject, permission, request.url.path, "allowed" if decision.allowed else "denied", decision.reason, rid)
                 if not decision.allowed:
+                    logger.info("authorization_denied", extra={"request_id": rid, "reason": decision.reason})
                     response = canonical_error("forbidden", "Permission denied.", rid, 403)
                     response.headers["X-Request-ID"] = rid
                     return apply_production_headers(response, settings.service_name)
         elif permission and request.url.path.startswith(("/sandbox", "/orchestrate", "/github", "/graph", "/governance", "/evolution")):
-            response = canonical_error("auth_not_configured", "Authorization must be configured for this endpoint.", rid, 503)
+            response = canonical_error("dependency_unavailable", "Authorization must be configured for this endpoint.", rid, 503)
             response.headers["X-Request-ID"] = rid
             return apply_production_headers(response, settings.service_name)
 
     response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    return apply_production_headers(response, settings.service_name)
+
+
+@app.exception_handler(PlatformError)
+async def platform_exception_handler(request: Request, exc: PlatformError):
+    rid = getattr(request.state, "request_id", request_id())
+    logger.info("platform_error", extra={"request_id": rid, "code": exc.code, "internal_message": exc.message})
+    response = canonical_error(exc.code, exc.safe_message, rid, exc.status_code)
     response.headers["X-Request-ID"] = rid
     return apply_production_headers(response, settings.service_name)
 
@@ -102,6 +137,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     rid = getattr(request.state, "request_id", request_id())
+    logger.exception("unhandled_api_error", extra={"request_id": rid})
     response = canonical_error("internal_error", "Request could not be completed.", rid, 500)
     response.headers["X-Request-ID"] = rid
     return apply_production_headers(response, settings.service_name)
@@ -171,7 +207,7 @@ def level(level: int):
     try:
         return service.level(level)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError("architecture level lookup failed") from exc
 
 
 @app.post("/chat")
@@ -179,7 +215,7 @@ def chat(request: ChatRequest):
     try:
         return service.chat(request)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="LLM provider unavailable") from exc
+        raise ProviderError("LLM provider unavailable") from exc
 
 
 @app.post("/completion")
@@ -187,7 +223,7 @@ def completion(request: ChatRequest):
     try:
         return service.chat(request)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="LLM provider unavailable") from exc
+        raise ProviderError("LLM provider unavailable") from exc
 
 
 @app.post("/embeddings")
@@ -195,7 +231,7 @@ def embeddings(request: EmbeddingRequest):
     try:
         return service.embeddings(request)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="LLM provider unavailable") from exc
+        raise ProviderError("LLM provider unavailable") from exc
 
 
 @app.get("/models")
@@ -268,9 +304,9 @@ def github_repository(request: RepositoryRequest):
     try:
         return service.github.index_repository(request.url, request.dependencies)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="Invalid repository URL") from exc
+        raise SandboxError("Invalid repository URL", safe_message="Invalid repository URL") from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="GitHub provider unavailable") from exc
+        raise ProviderError("GitHub provider unavailable") from exc
 
 
 @app.get("/github/repositories/{owner}/{repo}")
@@ -278,7 +314,7 @@ def github_analyze(owner: str, repo: str):
     try:
         return service.github.analyze(f"{owner}/{repo}")
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError("architecture level lookup failed") from exc
 
 
 @app.post("/sandbox/execute")
@@ -286,7 +322,7 @@ def sandbox_execute(request: SandboxRequest):
     try:
         return service.sandbox.execute(request.command, request.timeout_seconds)
     except ValueError as exc:
-        raise HTTPException(status_code=403, detail="Sandbox command denied") from exc
+        raise SandboxError("Sandbox command denied") from exc
 
 
 @app.post("/graph/entities")
@@ -299,7 +335,7 @@ def graph_relationship(request: RelationshipRequest, context: TenantContext = De
     try:
         return service.graph.relate(context, request.source, request.target, request.relationship, request.properties)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError("architecture level lookup failed") from exc
 
 
 @app.post("/graph/search")
@@ -317,7 +353,7 @@ def orchestrate_execute(checkpoint: str):
     try:
         return service.workflow.execute(checkpoint)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError("architecture level lookup failed") from exc
 
 
 @app.post("/orchestrate/{checkpoint}/recover")
@@ -325,7 +361,7 @@ def orchestrate_recover(checkpoint: str):
     try:
         return service.workflow.recover(checkpoint)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise NotFoundError("architecture level lookup failed") from exc
 
 
 @app.post("/governance/proposals")

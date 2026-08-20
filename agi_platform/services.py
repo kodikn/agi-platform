@@ -20,6 +20,7 @@ from .memory.core import MemoryLayer
 from .orchestration import WorkflowEngine
 from .research.core import ResearchLayer
 from .sandbox.core import SandboxLab
+from .security import TenantContext
 from .telemetry import TelemetryRegistry
 from .tool_registry import ToolRegistry
 
@@ -130,43 +131,44 @@ class PlatformService:
     def mcp_manifest(self) -> dict[str, Any]:
         return self.tool_registry.mcp_manifest()
 
-    def chat(self, request: ChatRequest) -> dict[str, Any]:
+    def chat(self, request: ChatRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="0", operation="chat"):
             result = self.llm.complete(request.message, request.model, request.stream)
             self.telemetry.increment("tokens_used", result["usage"]["input_tokens"] + result["usage"]["output_tokens"], level="0")
             self.telemetry.increment("cost", result["metrics"]["cost"], level="0")
             return result
 
-    def embeddings(self, request: EmbeddingRequest) -> dict[str, Any]:
+    def embeddings(self, request: EmbeddingRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="0", operation="embeddings"):
             return self.llm.embeddings(request.text)
 
-    def store_memory(self, request: MemoryRequest) -> dict[str, Any]:
+    def store_memory(self, request: MemoryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="1", operation="store_memory"):
-            record = self.memory.store(request.content, request.memory_type, request.metadata)
+            record = self.memory.store(request.content, request.memory_type, request.metadata, context)
             self.guardian.version(record)
             self.telemetry.increment("memories_stored", level="1")
             return record
 
-    def search_memory(self, request: QueryRequest) -> dict[str, Any]:
+    def search_memory(self, request: QueryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="1", operation="search_memory"):
-            return self.memory.search(request.query, request.limit)
+            return self.memory.search(request.query, request.limit, context)
 
-    def validate_memory(self, request: MemoryRequest) -> dict[str, Any]:
+    def validate_memory(self, request: MemoryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="2", operation="validate_memory"):
-            candidate = self.memory.store(request.content, request.memory_type, request.metadata)
-            result = self.guardian.validate(candidate, list(self.memory.records.values()))
+            candidate = self.memory.store(request.content, request.memory_type, request.metadata, context)
+            tenant_records = [record for record in self.memory.records.values() if record.get("tenant_id") == context.tenant_id]
+            result = self.guardian.validate(candidate, tenant_records)
             self.telemetry.increment("memory_reviews", level="2")
             return result
 
-    def research_report(self, request: QueryRequest) -> dict[str, Any]:
+    def research_report(self, request: QueryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="3", operation="research_report"):
-            return self.research.report(request.query)
+            return self.research.report(request.query, context=context)
 
-    def analyze_code(self, code: str) -> dict[str, Any]:
+    def analyze_code(self, code: str, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="5", operation="analyze_code"):
-            return self.analysis.analyze_code(code)
+            return self.analysis.analyze_code(code, context=context)
 
-    def improvement_proposals(self) -> dict[str, Any]:
+    def improvement_proposals(self, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="11", operation="improvement_proposals"):
-            return self.evolution.evaluate({"success_rate": 0.94, "failure_rate": 0.06, "tool_effectiveness": 0.79, "agent_effectiveness": 0.9})
+            return self.evolution.evaluate({"success_rate": 0.94, "failure_rate": 0.06, "tool_effectiveness": 0.79, "agent_effectiveness": 0.9}, context=context)

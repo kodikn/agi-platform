@@ -43,9 +43,10 @@ def test_level_5_and_6_analysis_and_github(monkeypatch):
     assert analysis.status_code == 200
     assert analysis.json()["metrics"]["findings_count"] == 2
 
-    def index_repository(url, dependencies=None):
+    def index_repository(url, dependencies=None, context=None):
         record = {"full_name": "openai/codex", "url": url, "default_branch": "main", "stars": 1, "open_issues": 0, "dependencies": dependencies or [], "contributors": ["octocat"]}
-        service.github.repositories["openai/codex"] = record
+        record["tenant_id"] = context.tenant_id if context else "tenant-a"
+        service.github.repositories[f"{record['tenant_id']}:openai/codex"] = record
         return record
 
     monkeypatch.setattr(service.github, "index_repository", index_repository)

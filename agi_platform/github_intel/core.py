@@ -7,13 +7,17 @@ from urllib.parse import urlparse
 
 import httpx
 
+from agi_platform.security import TenantContext
+
 
 @dataclass
 class GitHubIntelligence:
     repositories: dict[str, dict[str, Any]] = field(default_factory=dict)
     timeout_seconds: float = 20.0
 
-    def index_repository(self, url: str, dependencies: list[str] | None = None) -> dict[str, Any]:
+    def index_repository(self, url: str, dependencies: list[str] | None = None, context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
         parsed = urlparse(url)
         parts = parsed.path.strip("/").removesuffix(".git").split("/")
         if parsed.netloc not in {"github.com", "www.github.com"} or len(parts) < 2:
@@ -40,11 +44,14 @@ class GitHubIntelligence:
             "dependencies": dependencies or [],
             "contributors": [item.get("login") for item in contributors_response.json()],
         }
-        self.repositories[full_name] = record
+        record["tenant_id"] = context.tenant_id
+        self.repositories[f"{context.tenant_id}:{full_name}"] = record
         return record
 
-    def analyze(self, full_name: str) -> dict[str, Any]:
-        repo = self.repositories[full_name]
+    def analyze(self, full_name: str, context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
+        repo = self.repositories[f"{context.tenant_id}:{full_name}"]
         return {
             "repository": full_name,
             "dependency_count": len(repo["dependencies"]),

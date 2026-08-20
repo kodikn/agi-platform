@@ -66,3 +66,9 @@ The API exposes concrete endpoints for every platform level.
 - `GET /architecture/competitive-advantages`
 - `GET /metrics`
 - `GET /security/policy`
+
+## Tenant identity headers
+
+Protected endpoints require `X-API-Key`. The authenticated API key determines the tenant identity. Clients may send `X-Tenant-ID` only to narrow the request to the same tenant; a mismatched tenant header is rejected with `401` and cannot switch identity across tenants.
+
+API keys are tenant-bound, scoped, revocable, rotatable, and may expire. Operators must store only API key hashes in persistent storage and retain plaintext only at issuance time.

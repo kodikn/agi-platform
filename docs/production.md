@@ -71,3 +71,21 @@ Example development-only scoped key configuration:
   }
 ]
 ```
+
+## Multi-tenant identity architecture status
+
+The API key control plane now models tenants, users, service accounts, roles, permissions, hashed tenant-bound API keys, revocation, rotation metadata, optional expiration, and an in-process authentication audit trail. Runtime request flow is:
+
+```text
+request -> authentication -> identity -> tenant context -> authorization -> tenant-scoped service operation
+```
+
+Important invariants:
+
+- API keys are hashed at rest in the runtime identity registry and in the database schema; plaintext keys are accepted only at configuration/bootstrap boundaries.
+- The authenticated identity determines the tenant. `X-Tenant-ID` can only narrow the context to that same tenant and cannot switch identity to another tenant.
+- Cross-tenant access fails closed during authentication or tenant-scoped repository/service lookup.
+- Protected services require an explicit tenant context and tenant-filter memory, graph, workflow, governance, analysis, research, sandbox, GitHub, Chinese-hub, and evolution state.
+- API keys can be revoked, expired, and rotated with previous-key metadata during a retirement window.
+
+Remaining security work: the current implementation is still an in-process identity registry. Production must back tenants, users, service accounts, roles, permissions, API keys, and audit events with Postgres repositories, hashed key material, key prefix lookup, online rotation workflows, and centralized policy enforcement.

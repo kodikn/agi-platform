@@ -20,7 +20,7 @@ class MemoryGuardian:
                 duplicate = record
         risk_score = 0.8 if similarity > 0.9 else 0.2 if len(candidate.get("content", "")) > 20 else 0.5
         decision = "review" if risk_score >= 0.5 else "approve"
-        review = {"candidate_id": candidate.get("id"), "decision": decision, "risk_score": risk_score, "duplicate_id": duplicate.get("id") if duplicate and similarity > 0.9 else None}
+        review = {"tenant_id": candidate.get("tenant_id"), "candidate_id": candidate.get("id"), "decision": decision, "risk_score": risk_score, "duplicate_id": duplicate.get("id") if duplicate and similarity > 0.9 else None}
         self.reviews.append(review)
         return review
 
@@ -28,12 +28,12 @@ class MemoryGuardian:
         history = self.versions.setdefault(memory["id"], [])
         entry = {"version": len(history) + 1, "memory": dict(memory)}
         history.append(entry)
-        self.audit.append({"memory_id": memory["id"], "action": "versioned", "version": entry["version"]})
+        self.audit.append({"tenant_id": memory.get("tenant_id"), "memory_id": memory["id"], "action": "versioned", "version": entry["version"]})
         return entry
 
     def rollback(self, memory_id: str, version: int) -> dict:
         for entry in self.versions.get(memory_id, []):
             if entry["version"] == version:
-                self.audit.append({"memory_id": memory_id, "action": "rollback", "version": version})
+                self.audit.append({"tenant_id": entry["memory"].get("tenant_id"), "memory_id": memory_id, "action": "rollback", "version": version})
                 return entry["memory"]
         raise KeyError(f"version {version} not found for memory {memory_id}")

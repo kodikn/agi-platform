@@ -6,9 +6,10 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 from .competitive import COMPETITIVE_STRENGTHS, capability_names
+from .security import TenantContext
 
 
 class WorkflowStateStore:
@@ -16,7 +17,8 @@ class WorkflowStateStore:
 
     def __init__(self, path: str | Path | None = None) -> None:
         default_path = Path(tempfile.gettempdir()) / "agi-platform" / "workflow-state.json"
-        self.path = Path(path or os.getenv("AGI_WORKFLOW_STATE_PATH", default_path))
+        configured_path = path or os.getenv("AGI_WORKFLOW_STATE_PATH") or default_path
+        self.path = Path(configured_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def append(self, workflow: dict[str, Any]) -> None:
@@ -25,9 +27,9 @@ class WorkflowStateStore:
         workflows.append(workflow)
         self._write(workflows)
 
-    def get(self, checkpoint: str) -> dict[str, Any]:
+    def get(self, checkpoint: str, tenant_id: str | None = None) -> dict[str, Any]:
         for workflow in self.list():
-            if workflow.get("checkpoint") == checkpoint:
+            if workflow.get("checkpoint") == checkpoint and (tenant_id is None or workflow.get("tenant_id") == tenant_id):
                 return workflow
         raise KeyError(f"checkpoint {checkpoint} not found")
 
@@ -43,7 +45,7 @@ class WorkflowStateStore:
         data = json.loads(content)
         return data if isinstance(data, list) else []
 
-    def _write(self, workflows: list[dict[str, Any]]) -> None:
+    def _write(self, workflows: List[dict[str, Any]]) -> None:
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(workflows, indent=2, sort_keys=True), encoding="utf-8")
         temporary.replace(self.path)
@@ -54,7 +56,9 @@ class WorkflowEngine:
     state_store: WorkflowStateStore = field(default_factory=WorkflowStateStore)
     runs: list[dict[str, Any]] = field(default_factory=list)
 
-    def plan(self, task: str, agents: list[str] | None = None) -> dict[str, Any]:
+    def plan(self, task: str, agents: list[str] | None = None, context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
         agents = agents or ["architect", "implementer", "reviewer"]
         checkpoint = f"checkpoint-{len(self.state_store.list()) + 1}"
         now = int(time.time())
@@ -71,6 +75,8 @@ class WorkflowEngine:
             for index, agent in enumerate(agents)
         ]
         workflow = {
+            "tenant_id": context.tenant_id,
+            "actor": context.subject,
             "task": task,
             "steps": steps,
             "checkpoint": checkpoint,
@@ -88,8 +94,10 @@ class WorkflowEngine:
         self.state_store.append(workflow)
         return workflow
 
-    def execute(self, checkpoint: str) -> dict[str, Any]:
-        workflow = self.state_store.get(checkpoint)
+    def execute(self, checkpoint: str, context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
+        workflow = self.state_store.get(checkpoint, context.tenant_id)
         if workflow["status"] not in {"planned", "recovered", "running"}:
             return workflow
         workflow["status"] = "running"
@@ -138,8 +146,10 @@ class WorkflowEngine:
     def competitive_blueprint(self) -> list[dict[str, Any]]:
         return [strength.__dict__ for strength in COMPETITIVE_STRENGTHS]
 
-    def recover(self, checkpoint: str) -> dict[str, Any]:
-        workflow = self.state_store.get(checkpoint)
+    def recover(self, checkpoint: str, context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
+        workflow = self.state_store.get(checkpoint, context.tenant_id)
         recovered = {**workflow, "status": "recovered", "updated_at": int(time.time())}
         self.state_store.update(recovered)
         return recovered

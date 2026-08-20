@@ -7,18 +7,23 @@ from typing import Any
 
 import httpx
 
+from agi_platform.security import TenantContext
+
 
 @dataclass
 class ChineseResearchHub:
     articles: list[dict[str, Any]] = field(default_factory=list)
     timeout_seconds: float = 20.0
 
-    def ingest(self, title: str, body: str, script: str = "simplified") -> dict[str, Any]:
+    def ingest(self, title: str, body: str, script: str = "simplified", context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
         translation = self._translate(body)
         classification = self._classify(body)
         iocs = re.findall(r"(?:\d{1,3}\.){3}\d{1,3}|[a-fA-F0-9]{32,64}|CVE-\d{4}-\d+", body, flags=re.IGNORECASE)
         article = {
-            "id": len(self.articles) + 1,
+            "id": len([item for item in self.articles if item.get("tenant_id") == context.tenant_id]) + 1,
+            "tenant_id": context.tenant_id,
             "title": title,
             "script": script,
             "original": body,

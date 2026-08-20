@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from agi_platform.security import TenantContext
+
 
 @dataclass
 class ResearchLayer:
@@ -27,9 +29,11 @@ class ResearchLayer:
         trust_score = round(sum(item["trust_score"] for item in evidence) / len(evidence), 3) if evidence else 0.0
         return {"query": query, "evidence": evidence, "iocs": iocs, "trust_score": trust_score, "errors": errors}
 
-    def report(self, query: str) -> dict[str, Any]:
+    def report(self, query: str, context: TenantContext | None = None) -> dict[str, Any]:
+        if context is None:
+            raise ValueError("tenant context is required")
         result = self.query(query)
-        report = {"query": query, "summary": self._summary(result), **result}
+        report = {"tenant_id": context.tenant_id, "query": query, "summary": self._summary(result), **result}
         self.reports.append(report)
         return report
 

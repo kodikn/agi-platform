@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import socket
@@ -7,7 +9,8 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 if TYPE_CHECKING:
@@ -15,25 +18,125 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class Identity:
-    subject: str
+class Tenant:
     tenant_id: str
+    name: str
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class User:
+    user_id: str
+    tenant_id: str
+    email: str
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class ServiceAccount:
+    service_account_id: str
+    tenant_id: str
+    subject: str
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class Permission:
+    name: str
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class Role:
+    name: str
+    tenant_id: str
+    permissions: frozenset[str]
+
+
+@dataclass(frozen=True)
+class TenantContext:
+    tenant_id: str
+    subject: str
+    key_id: str
     roles: frozenset[str]
     permissions: frozenset[str]
-    key_id: str = ""
+    service_account_id: str | None = None
+    user_id: str | None = None
 
     def can(self, permission: str) -> bool:
         return "*" in self.permissions or permission in self.permissions
 
 
+Identity = TenantContext
+
+
 @dataclass(frozen=True)
 class APIKeyRecord:
-    key: str
+    key_hash: str
     subject: str
     tenant_id: str
     roles: frozenset[str]
     permissions: frozenset[str]
     key_id: str
+    service_account_id: str | None = None
+    user_id: str | None = None
+    revoked: bool = False
+    expires_at: int | None = None
+    previous_key_hashes: frozenset[str] = frozenset()
+    created_at: int = field(default_factory=lambda: int(time.time()))
+
+    def is_expired(self, now: int | None = None) -> bool:
+        return self.expires_at is not None and (now or int(time.time())) >= self.expires_at
+
+    def matches(self, raw_key: str) -> bool:
+        candidate = hash_api_key(raw_key)
+        return hmac.compare_digest(candidate, self.key_hash) or any(hmac.compare_digest(candidate, old) for old in self.previous_key_hashes)
+
+
+@dataclass
+class IdentityRegistry:
+    tenants: dict[str, Tenant] = field(default_factory=dict)
+    users: dict[str, User] = field(default_factory=dict)
+    service_accounts: dict[str, ServiceAccount] = field(default_factory=dict)
+    roles: dict[tuple[str, str], Role] = field(default_factory=dict)
+    permissions: dict[str, Permission] = field(default_factory=dict)
+    api_keys: dict[str, APIKeyRecord] = field(default_factory=dict)
+    audit_trail: list[dict[str, Any]] = field(default_factory=list)
+
+    def authenticate(self, raw_key: str | None, requested_tenant_id: str | None = None) -> TenantContext | None:
+        if not raw_key:
+            self._audit("api_key.missing", None, None, "denied")
+            return None
+        record = next((item for item in self.api_keys.values() if item.matches(raw_key)), None)
+        if record is None:
+            self._audit("api_key.invalid", None, requested_tenant_id, "denied")
+            return None
+        if record.revoked:
+            self._audit("api_key.revoked", record.key_id, record.tenant_id, "denied")
+            return None
+        if record.is_expired():
+            self._audit("api_key.expired", record.key_id, record.tenant_id, "denied")
+            return None
+        tenant = self.tenants.get(record.tenant_id)
+        if tenant is not None and not tenant.active:
+            self._audit("tenant.inactive", record.key_id, record.tenant_id, "denied")
+            return None
+        if requested_tenant_id and requested_tenant_id != record.tenant_id:
+            self._audit("tenant.mismatch", record.key_id, requested_tenant_id, "denied")
+            return None
+        self._audit("api_key.authenticated", record.key_id, record.tenant_id, "allowed")
+        return TenantContext(
+            tenant_id=record.tenant_id,
+            subject=record.subject,
+            key_id=record.key_id,
+            roles=record.roles,
+            permissions=record.permissions,
+            service_account_id=record.service_account_id,
+            user_id=record.user_id,
+        )
+
+    def _audit(self, action: str, key_id: str | None, tenant_id: str | None, result: str) -> None:
+        self.audit_trail.append({"action": action, "key_id": key_id, "tenant_id": tenant_id, "result": result, "timestamp": int(time.time())})
 
 
 PERMISSION_BY_ROUTE: dict[tuple[str, str], str] = {
@@ -83,25 +186,62 @@ class RateLimiter:
         return True
 
 
-def parse_api_keys(raw: str | None, legacy_key: str | None) -> dict[str, APIKeyRecord]:
-    records: dict[str, APIKeyRecord] = {}
+def hash_api_key(raw_key: str) -> str:
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def _parse_expires_at(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    text = str(value)
+    if text.isdigit():
+        return int(text)
+    return int(datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(UTC).timestamp())
+
+
+def parse_api_keys(raw: str | None, legacy_key: str | None) -> IdentityRegistry:
+    registry = IdentityRegistry()
+    data: list[dict[str, Any]] = []
     if raw:
-        data = json.loads(raw)
-        if not isinstance(data, list):
+        loaded = json.loads(raw)
+        if not isinstance(loaded, list):
             raise ValueError("AGI_API_KEYS must be a JSON list")
-        for index, item in enumerate(data):
-            key = str(item["key"])
-            records[key] = APIKeyRecord(
-                key=key,
-                subject=str(item.get("subject") or f"service-account-{index}"),
-                tenant_id=str(item["tenant_id"]),
-                roles=frozenset(item.get("roles", ["service"])),
-                permissions=frozenset(item.get("permissions", [])),
-                key_id=str(item.get("key_id") or f"key-{index}"),
-            )
-    if legacy_key and legacy_key not in records:
-        records[legacy_key] = APIKeyRecord(legacy_key, "legacy-api-key", "legacy", frozenset({"admin"}), frozenset({"*"}), "legacy")
-    return records
+        data = loaded
+    if legacy_key:
+        data.append({"key": legacy_key, "key_id": "legacy", "subject": "legacy-api-key", "tenant_id": "legacy", "roles": ["admin"], "permissions": ["*"], "service_account_id": "legacy"})
+
+    for index, item in enumerate(data):
+        tenant_id = str(item["tenant_id"])
+        subject = str(item.get("subject") or f"service-account-{index}")
+        key_id = str(item.get("key_id") or f"key-{index}")
+        service_account_id = str(item.get("service_account_id") or subject)
+        roles = frozenset(str(role) for role in item.get("roles", ["service"]))
+        permissions = frozenset(str(permission) for permission in item.get("permissions", []))
+        for permission in permissions:
+            registry.permissions.setdefault(permission, Permission(permission))
+        for role in roles:
+            registry.roles.setdefault((tenant_id, role), Role(role, tenant_id, permissions))
+        registry.tenants.setdefault(tenant_id, Tenant(tenant_id, str(item.get("tenant_name") or tenant_id), bool(item.get("tenant_active", True))))
+        registry.service_accounts.setdefault(service_account_id, ServiceAccount(service_account_id, tenant_id, subject, bool(item.get("active", True))))
+        previous_hashes = frozenset(hash_api_key(str(key)) for key in item.get("previous_keys", []))
+        registry.api_keys[key_id] = APIKeyRecord(
+            key_hash=str(item.get("key_hash") or hash_api_key(str(item["key"]))),
+            subject=subject,
+            tenant_id=tenant_id,
+            roles=roles,
+            permissions=permissions,
+            key_id=key_id,
+            service_account_id=service_account_id,
+            user_id=item.get("user_id"),
+            revoked=bool(item.get("revoked", False)),
+            expires_at=_parse_expires_at(item.get("expires_at")),
+            previous_key_hashes=previous_hashes,
+        )
+    return registry
 
 
 def route_permission(method: str, path: str) -> str | None:
@@ -114,17 +254,15 @@ def route_permission(method: str, path: str) -> str | None:
     return None
 
 
-def authenticate_request(request: Request, api_keys: dict[str, APIKeyRecord]) -> Identity | None:
-    raw_key = request.headers.get("X-API-Key")
-    if not raw_key:
-        return None
-    record = api_keys.get(raw_key)
-    if not record:
-        return None
-    tenant_header = request.headers.get("X-Tenant-ID")
-    if tenant_header and tenant_header != record.tenant_id:
-        return None
-    return Identity(record.subject, record.tenant_id, record.roles, record.permissions, record.key_id)
+def authenticate_request(request: Request, registry: IdentityRegistry) -> TenantContext | None:
+    return registry.authenticate(request.headers.get("X-API-Key"), request.headers.get("X-Tenant-ID"))
+
+
+def require_tenant_context(request: Request) -> TenantContext:
+    context = getattr(request.state, "tenant_context", None)
+    if context is None:
+        raise RuntimeError("tenant context is required")
+    return context
 
 
 def canonical_error(code: str, message: str, request_id: str, status_code: int):
@@ -144,8 +282,27 @@ def apply_production_headers(response, service_name: str):
     return response
 
 
+def is_public_path(path: str) -> bool:
+    return path in public_paths() or path.startswith("/architecture/levels/")
+
+
 def public_paths() -> set[str]:
-    return {"/", "/health", "/live", "/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
+    return {
+        "/",
+        "/health",
+        "/live",
+        "/ready",
+        "/metrics",
+        "/security/policy",
+        "/architecture/levels",
+        "/architecture/readiness",
+        "/architecture/competitive-advantages",
+        "/tools",
+        "/mcp/manifest",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
 
 
 BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}

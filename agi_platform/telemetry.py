@@ -23,9 +23,9 @@ class TelemetryRegistry:
         started = time.perf_counter()
         try:
             yield
-            self.increment(f"{name}_success_total", **labels)
+            self.increment(f"{name}_success_total", 1.0, **labels)
         except Exception:
-            self.increment(f"{name}_error_total", **labels)
+            self.increment(f"{name}_error_total", 1.0, **labels)
             raise
         finally:
             self.observe(f"{name}_latency_ms", round((time.perf_counter() - started) * 1000, 3), **labels)

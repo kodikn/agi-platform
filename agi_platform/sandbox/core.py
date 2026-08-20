@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agi_platform.security import TenantContext
+
 
 _ALLOWED_COMMANDS = {"python", "python3", "echo"}
 _SAFE_ENV = {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"}
@@ -46,7 +48,9 @@ class SandboxLab:
     runs: list[dict] = field(default_factory=list)
     policy: SandboxPolicy = field(default_factory=SandboxPolicy)
 
-    def execute(self, command: list[str], timeout_seconds: int = 5) -> dict:
+    def execute(self, command: list[str], timeout_seconds: int = 5, context: TenantContext | None = None) -> dict:
+        if context is None:
+            raise ValueError("tenant context is required")
         timeout = self.policy.validate(command, timeout_seconds)
         started = time.perf_counter()
         with tempfile.TemporaryDirectory(prefix="agi-sandbox-") as workspace:
@@ -65,6 +69,7 @@ class SandboxLab:
                 stdout = completed.stdout[: self.policy.max_output_bytes]
                 stderr = completed.stderr[: self.policy.max_output_bytes]
                 result = {
+                    "tenant_id": context.tenant_id,
                     "command": command,
                     "returncode": completed.returncode,
                     "stdout": stdout,
@@ -76,6 +81,7 @@ class SandboxLab:
                 }
             except subprocess.TimeoutExpired as exc:
                 result = {
+                    "tenant_id": context.tenant_id,
                     "command": command,
                     "returncode": 124,
                     "stdout": (exc.stdout or "")[: self.policy.max_output_bytes],
@@ -90,7 +96,9 @@ class SandboxLab:
         return result
 
     def capability_check(self) -> dict:
-        result = self.execute(["echo", "sandbox-ready"], timeout_seconds=1)
+        from agi_platform.security import TenantContext
+
+        result = self.execute(["echo", "sandbox-ready"], timeout_seconds=1, context=TenantContext("capability-check", "system", "capability-check", frozenset(), frozenset({"*"})))
         return {"status": "ready" if result["stdout"] == "sandbox-ready\n" else "not-ready", "result": result}
 
     def _apply_process_limits(self) -> None:

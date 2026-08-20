@@ -88,6 +88,16 @@ def architecture_competitive_advantages():
     return service.competitive_advantages()
 
 
+@app.get("/tools")
+def tools():
+    return service.tools()
+
+
+@app.get("/mcp/manifest")
+def mcp_manifest():
+    return service.mcp_manifest()
+
+
 @app.get("/architecture/levels/{level}")
 def level(level: int):
     try:
@@ -138,6 +148,11 @@ def memory_search(request: QueryRequest):
 @app.post("/memory/retrieve")
 def memory_retrieve(request: QueryRequest):
     return service.search_memory(request)
+
+
+@app.get("/memory/external/health")
+def memory_external_health():
+    return service.external_memory_health()
 
 
 @app.post("/memory/consolidate")
@@ -247,6 +262,16 @@ def governance_reviews(request: GovernanceReviewRequest):
 @app.post("/evolution/evaluate")
 def evolution_evaluate(request: EvaluationRequest):
     return service.evolution.evaluate(request.metrics)
+
+
+@app.post("/evolution/self-test")
+def evolution_self_test():
+    return service.self_test()
+
+
+@app.post("/evolution/architecture-proposals")
+def evolution_architecture_proposals():
+    return service.architecture_self_improvement_proposals()
 
 
 @app.post("/evolution/proposals")

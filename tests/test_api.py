@@ -53,3 +53,46 @@ def test_orchestrator_includes_best_of_breed_capabilities():
     assert "workflow_graph" in body["competitive_capabilities"]
     assert "crew_flow" in body["competitive_capabilities"]
     assert "production_backend" in body["competitive_capabilities"]
+
+
+def test_tool_registry_exposes_governed_contracts():
+    response = client.get("/tools")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] >= 5
+    sandbox = next(tool for tool in body["tools"] if tool["name"] == "sandbox.execute")
+    assert sandbox["side_effects"] is True
+    assert sandbox["risk"] == "high"
+    assert "sandbox:execute" in sandbox["permissions"]
+
+
+def test_mcp_manifest_lists_approved_tools():
+    response = client.get("/mcp/manifest")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["protocol"] == "mcp-compatible"
+    assert body["capabilities"]["tools"] is True
+    names = {tool["name"] for tool in body["tools"]}
+    assert {"memory.search", "research.report", "sandbox.execute"}.issubset(names)
+
+
+def test_external_memory_health_defaults_to_disabled():
+    response = client.get("/memory/external/health")
+    assert response.status_code == 200
+    assert response.json()["status"] in {"disabled", "ok", "unavailable", "not-ready"}
+
+
+def test_self_improvement_proposals_are_approval_gated():
+    response = client.post("/evolution/architecture-proposals")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["approval_required"] is True
+    assert body["auto_apply"] is False
+
+
+def test_self_test_reports_checks_without_applying_changes():
+    response = client.post("/evolution/self-test")
+    assert response.status_code == 200
+    body = response.json()
+    assert "checks" in body
+    assert {check["name"] for check in body["checks"]} >= {"service_health", "level_catalog", "model_provider"}

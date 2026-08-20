@@ -17,14 +17,15 @@ class Provider:
     api_key_env: str | None = None
     chat_path: str = "/v1/chat/completions"
     embeddings_path: str = "/v1/embeddings"
+    api_key_value: str | None = None
 
     @property
     def api_key(self) -> str | None:
-        return os.getenv(self.api_key_env) if self.api_key_env else None
+        return self.api_key_value or (os.getenv(self.api_key_env) if self.api_key_env else None)
 
     @property
     def configured(self) -> bool:
-        return self.api_key is not None or (self.name in {"ollama", "vllm", "lm-studio"} and bool(self.base_url))
+        return self.api_key is not None or (self.name in {"ollama", "vllm", "lm-studio", "local"} and bool(self.base_url))
 
 
 @dataclass
@@ -44,6 +45,7 @@ class LLMCore:
                 Provider("ollama", ("llama3",), 50, os.getenv("OLLAMA_BASE_URL", ""), None, "/api/chat", "/api/embeddings"),
                 Provider("vllm", ("vllm-local",), 60, os.getenv("VLLM_BASE_URL", ""), None),
                 Provider("lm-studio", ("lm-studio-local",), 70, os.getenv("LM_STUDIO_BASE_URL", ""), None),
+                Provider("local", (os.getenv("LOCAL_LLM_MODEL", "local-model"),), 80, os.getenv("LOCAL_LLM_BASE_URL", ""), None, api_key_value=os.getenv("LOCAL_LLM_API_KEY")),
             )
             self.providers.update({provider.name: provider for provider in defaults})
 

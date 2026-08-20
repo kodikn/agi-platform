@@ -12,6 +12,7 @@ The API exposes concrete endpoints for every platform level.
 - `POST /memory/store`
 - `POST /memory/search`
 - `POST /memory/retrieve`
+- `GET /memory/external/health`
 - `POST /memory/consolidate`
 
 ## Level 2 — Memory Guardian
@@ -52,7 +53,15 @@ The API exposes concrete endpoints for every platform level.
 
 ## Level 11 — Self Improvement
 - `POST /evolution/evaluate`
+- `POST /evolution/self-test`
+- `POST /evolution/architecture-proposals`
 - `POST /evolution/proposals`
+
+## Tool and Agent Integration
+- `GET /tools`
+  - Returns versionable tool contracts with level ownership, input/output schemas, permissions, side-effect flags, and risk classes.
+- `GET /mcp/manifest`
+  - Returns an MCP-compatible tool manifest that agents can use to discover approved platform capabilities.
 
 ## Production Operations
 - `GET /ready`

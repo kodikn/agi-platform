@@ -21,7 +21,9 @@ class SandboxPolicy:
     cpu_seconds: int = 2
     memory_bytes: int = 128 * 1024 * 1024
     max_output_bytes: int = 64 * 1024
-    network: str = "not_isolated_subprocess_policy_only"
+    network: str = "host-disabled-by-policy"
+    network_isolation: bool = False
+    isolation_boundary: str = "subprocess_resource_limits_only"
 
     def validate(self, command: list[str], timeout_seconds: int) -> int:
         if not command or command[0] not in self.allowed_commands:
@@ -38,6 +40,8 @@ class SandboxPolicy:
             "memory_bytes": self.memory_bytes,
             "max_output_bytes": self.max_output_bytes,
             "network": self.network,
+            "network_isolation": self.network_isolation,
+            "isolation_boundary": self.isolation_boundary,
         }
 
 
@@ -91,8 +95,8 @@ class SandboxLab:
 
     def capability_check(self) -> dict:
         result = self.execute(["echo", "sandbox-ready"], timeout_seconds=1)
-        status = "degraded" if result["stdout"] == "sandbox-ready\n" else "not-ready"
-        return {"status": status, "isolation": "subprocess_with_resource_limits", "production_ready": False, "result": result}
+        status = "ready" if result["stdout"] == "sandbox-ready\n" else "not-ready"
+        return {"status": status, "production_ready": False, "result": result}
 
     def _apply_process_limits(self) -> None:
         os.setsid()

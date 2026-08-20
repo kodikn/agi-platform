@@ -34,6 +34,11 @@ Compose starts the API plus Postgres/pgvector, Qdrant, Redis, and Neo4j.
 - Level 10: architecture proposals, risk scoring, decisions, reviews, and approvals.
 - Level 11: telemetry evaluation and automatic improvement proposals.
 
+
+## Best-of-breed capabilities
+
+The orchestrator adopts strengths from leading open-source agent projects: LangGraph-style workflow graphs and recovery checkpoints, CrewAI-style crews/flows, AutoGen-style agent handoff traces, AutoGPT-style extensibility hooks, MetaGPT-style SOP roles, ChatDev-style zero-code contracts, and FastAPI/LangGraph-template production backend controls. Use `GET /architecture/competitive-advantages` to inspect the adopted capability catalog.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)

@@ -44,6 +44,7 @@ The API exposes concrete endpoints for every platform level.
 
 ## Level 9 — Orchestrator
 - `POST /orchestrate`
+  - Returns a checkpointed workflow graph, crew/role routing, agent handoff trace, zero-code workflow contract, and competitive capability tags adopted from leading multi-agent projects.
 
 ## Level 10 — Architecture Governance
 - `POST /governance/proposals`
@@ -56,5 +57,6 @@ The API exposes concrete endpoints for every platform level.
 ## Production Operations
 - `GET /ready`
 - `GET /architecture/readiness`
+- `GET /architecture/competitive-advantages`
 - `GET /metrics`
 - `GET /security/policy`

@@ -31,5 +31,12 @@ def security_headers() -> dict[str, str]:
     }
 
 
+def apply_production_headers(response, service_name: str):
+    for key, value in security_headers().items():
+        response.headers[key] = value
+    response.headers["X-Service-Name"] = service_name
+    return response
+
+
 def public_paths() -> set[str]:
-    return {"/", "/health", "/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
+    return {"/", "/health", "/live", "/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}

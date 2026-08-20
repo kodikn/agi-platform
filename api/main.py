@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from agi_platform.config import settings
 from agi_platform.readiness import platform_ready
-from agi_platform.security import RateLimiter, public_paths, security_headers
+from agi_platform.security import RateLimiter, apply_production_headers, public_paths
 from agi_platform.services import (
     ChatRequest,
     ChineseArticleRequest,
@@ -31,15 +31,12 @@ rate_limiter = RateLimiter(settings.rate_limit_per_minute)
 async def production_controls(request: Request, call_next):
     identity = request.client.host if request.client else "unknown"
     if not rate_limiter.allow(identity):
-        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
+        return apply_production_headers(JSONResponse(status_code=429, content={"detail": "rate limit exceeded"}), settings.service_name)
     if settings.api_key and request.url.path not in public_paths():
         if request.headers.get("X-API-Key") != settings.api_key:
-            return JSONResponse(status_code=401, content={"detail": "invalid API key"})
+            return apply_production_headers(JSONResponse(status_code=401, content={"detail": "invalid API key"}), settings.service_name)
     response = await call_next(request)
-    for key, value in security_headers().items():
-        response.headers[key] = value
-    response.headers["X-Service-Name"] = settings.service_name
-    return response
+    return apply_production_headers(response, settings.service_name)
 
 
 class CodeAnalysisRequest(BaseModel):
@@ -54,6 +51,11 @@ def root():
 @app.get("/health")
 def health():
     return service.health()
+
+
+@app.get("/live")
+def live():
+    return {"status": "alive", "service": settings.service_name}
 
 
 @app.get("/ready")
@@ -79,6 +81,11 @@ def levels():
 @app.get("/architecture/readiness")
 def architecture_readiness():
     return platform_ready()["levels"]
+
+
+@app.get("/architecture/competitive-advantages")
+def architecture_competitive_advantages():
+    return service.competitive_advantages()
 
 
 @app.get("/architecture/levels/{level}")

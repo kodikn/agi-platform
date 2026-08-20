@@ -35,3 +35,18 @@ The runtime no longer fabricates LLM, GitHub, research, or translation responses
 - `LIBRETRANSLATE_URL` and optional `LIBRETRANSLATE_API_KEY` for Chinese-to-English translation.
 
 When an integration is not configured or a remote API is unavailable, the API returns the real unavailable state instead of generated sample content.
+
+## Production hardening checklist / чеклист посилення
+
+Перед роботою з реальними користувачами перевірте ці controls у production-like середовищі:
+
+- Збирайте та деплойте immutable container images; Kubernetes manifests не мають використовувати `latest` tags.
+- Зберігайте provider credentials і database URLs у Kubernetes Secrets або зовнішньому secret manager.
+- Зберігайте non-secret runtime settings у ConfigMaps і тримайте environment-specific values поза image.
+- Увімкніть readiness, liveness і startup probes для API deployment.
+- Задайте CPU/memory requests і limits для кожного container.
+- Запускайте containers як non-root там, де це можливо, і drop unnecessary Linux capabilities.
+- Підтвердіть, що `/ready` повертає `ready` лише після успішного import усіх level implementations і required dependencies.
+- Підтвердіть, що `/live` лишається lightweight і не залежить від databases або remote providers.
+- Налаштуйте dashboards і alerts з `/metrics` перед увімкненням production traffic.
+- Зафіксуйте database migrations і перевірте rollback/restore procedures перед deployment.

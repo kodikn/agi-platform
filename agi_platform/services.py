@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from .analysis.core import AnalysisLayer
 from .catalog import PLATFORM_LEVELS, get_level
+from .competitive import competitive_strengths
 from .chinese_hub.core import ChineseResearchHub
 from .evolution.core import SelfImprovementEngine
 from .github_intel.core import GitHubIntelligence
@@ -117,6 +118,9 @@ class PlatformService:
 
     def level(self, level: int) -> dict[str, Any]:
         return asdict(get_level(level))
+
+    def competitive_advantages(self) -> dict[str, Any]:
+        return {"sources": competitive_strengths(), "count": len(competitive_strengths())}
 
     def chat(self, request: ChatRequest) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="0", operation="chat"):

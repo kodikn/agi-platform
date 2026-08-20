@@ -81,3 +81,25 @@ def test_level_9_to_11_orchestration_governance_evolution():
     evaluation = client.post("/evolution/evaluate", json={"metrics": {"success_rate": 0.9, "failure_rate": 0.1, "tool_effectiveness": 0.7}})
     assert evaluation.status_code == 200
     assert len(evaluation.json()["proposals"]) == 2
+
+
+def test_architecture_catalog_matches_target_module_tree():
+    expected_modules = {
+        0: ("providers/", "router/", "registry/", "telemetry/"),
+        1: ("working_memory/", "episodic_memory/", "semantic_memory/", "retrieval/", "consolidation/"),
+        2: ("validator/", "deduplication/", "approval/", "audit/", "rollback/"),
+        3: ("collectors/", "extraction/", "ranking/", "reporting/"),
+        4: ("ingestion/", "translation/", "classification/", "threat_extraction/", "enrichment/"),
+        5: ("static_analysis/", "dependency_analysis/", "architecture_analysis/", "security_analysis/", "repository_analysis/"),
+        6: ("repository_indexer/", "commit_analyzer/", "issue_analyzer/", "pr_analyzer/", "dependency_graph/", "knowledge_extractor/"),
+        7: ("runtime/", "isolation/", "monitoring/", "artifacts/", "cleanup/"),
+        8: ("entities/", "relationships/", "graph_store/", "graph_search/", "analytics/"),
+        9: ("workflow_engine/", "task_router/", "agent_router/", "checkpoint_manager/", "recovery_manager/", "planner/"),
+        10: ("proposals/", "decisions/", "reviews/", "risk_management/", "approvals/"),
+        11: ("telemetry/", "evaluation/", "optimization/", "learning/", "pattern_discovery/", "improvement_engine/"),
+    }
+
+    for level, modules in expected_modules.items():
+        response = client.get(f"/architecture/levels/{level}")
+        assert response.status_code == 200
+        assert tuple(response.json()["modules"]) == modules

@@ -2,10 +2,14 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - target: 8000
+        published: 8000
+        protocol: tcp
+        mode: host
     environment:
-      AGI_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-agi}:${POSTGRES_PASSWORD:-agi}@postgres:5432/${POSTGRES_DB:-agi}
+      AGI_ENV: ${AGI_ENV:-development}
+      AGI_REDIS_REQUIRED: ${AGI_REDIS_REQUIRED:-true}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-agi}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-agi}
       QDRANT_URL: http://qdrant:6333
       NEO4J_URI: bolt://neo4j:7687
       REDIS_URL: redis://redis:6379/0
@@ -18,6 +22,13 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    user: "10001:10001"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/live', timeout=2)"]
       interval: 30s
@@ -28,11 +39,14 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER:-agi}
       POSTGRES_DB: ${POSTGRES_DB:-agi}
+    profiles: ["dev", "prod"]
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-agi} -d $${POSTGRES_DB:-agi}"]
       interval: 10s
@@ -41,13 +55,20 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.15.1
+    profiles: ["dev", "prod"]
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
 
   redis:
-    image: redis:7
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "", "--protected-mode", "yes"]
+    profiles: ["dev", "prod"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -55,9 +76,21 @@ services:
       retries: 5
 
   neo4j:
-    image: neo4j:5
+    image: neo4j:5.25.1-community
     environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-agi-platform}
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD}
+    profiles: ["dev", "prod"]
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:
+  neo4j_data:
+# Legacy local placeholders intentionally documented only; production uses required secrets.
+# ${POSTGRES_PASSWORD:-agi}
+# neo4j/${NEO4J_PASSWORD:-agi-platform}

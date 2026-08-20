@@ -1,19 +1,92 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agi-platform-api
+  labels:
+    app.kubernetes.io/name: agi-platform
+    app.kubernetes.io/component: api
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agi-platform-api
+rules: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agi-platform-api
+subjects:
+  - kind: ServiceAccount
+    name: agi-platform-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agi-platform-api
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agi-platform-config
+data:
+  AGI_ENV: production
+  AGI_SERVICE_NAME: agi-platform
+  AGI_REDIS_REQUIRED: "true"
+  AGI_RATE_LIMIT_FAIL_OPEN: "false"
+  AGI_RATE_LIMIT_PER_MINUTE: "120"
+  QDRANT_URL: http://qdrant:6333
+  NEO4J_URI: bolt://neo4j:7687
+  REDIS_URL: redis://redis:6379/0
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agi-platform-secrets
+type: Opaque
+stringData:
+  # Replace with ExternalSecrets/SealedSecrets in production; do not commit real values.
+  DATABASE_URL: postgresql://agi:${POSTGRES_PASSWORD}@postgres:5432/agi
+  AGI_API_KEYS: "[]"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: agi-platform-api
+  labels:
+    app.kubernetes.io/name: agi-platform
+    app.kubernetes.io/component: api
 spec:
-  replicas: 2
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
-      app: agi-platform-api
+      app.kubernetes.io/name: agi-platform
+      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
-        app: agi-platform-api
+        app.kubernetes.io/name: agi-platform
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8000"
     spec:
+      serviceAccountName: agi-platform-api
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -21,55 +94,219 @@ spec:
           image: agi-platform:0.3.0
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000
+            - name: http
+              containerPort: 8000
           envFrom:
-            - secretRef:
-                name: agi-platform-secrets
             - configMapRef:
                 name: agi-platform-config
+            - secretRef:
+                name: agi-platform-secrets
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          startupProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+            timeoutSeconds: 2
           readinessProbe:
             httpGet:
               path: /ready
-              port: 8000
-            initialDelaySeconds: 10
+              port: http
+            initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /live
-              port: 8000
+              port: http
             initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 3
             failureThreshold: 3
-          startupProbe:
-            httpGet:
-              path: /live
-              port: 8000
-            periodSeconds: 5
-            failureThreshold: 24
           resources:
             requests:
-              cpu: 250m
+              cpu: 300m
               memory: 512Mi
             limits:
               cpu: "1"
               memory: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
-              drop:
-                - ALL
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: agi-platform-api
+  labels:
+    app.kubernetes.io/name: agi-platform
+    app.kubernetes.io/component: api
 spec:
+  type: ClusterIP
   selector:
-    app: agi-platform-api
+    app.kubernetes.io/name: agi-platform
+    app.kubernetes.io/component: api
   ports:
-    - port: 80
-      targetPort: 8000
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agi-platform-api
+  annotations:
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["agi.example.com"]
+      secretName: agi-platform-tls
+  rules:
+    - host: agi.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agi-platform-api
+                port:
+                  name: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agi-platform-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agi-platform-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Pods
+      pods:
+        metric:
+          name: http_request_duration_seconds_p95
+        target:
+          type: AverageValue
+          averageValue: "750m"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agi-platform-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agi-platform
+      app.kubernetes.io/component: api
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agi-platform-api-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agi-platform
+      app.kubernetes.io/component: api
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: qdrant
+      ports:
+        - protocol: TCP
+          port: 6333
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: neo4j
+      ports:
+        - protocol: TCP
+          port: 7687
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              observability: "true"
+      ports:
+        - protocol: TCP
+          port: 4318
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agi-platform-databases-not-public
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ["postgres", "redis", "qdrant", "neo4j"]
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agi-platform
+              app.kubernetes.io/component: api

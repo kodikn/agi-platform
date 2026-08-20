@@ -12,3 +12,39 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - run: pytest
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency scan
+        uses: pypa/gh-action-pip-audit@v1.0.8
+        with:
+          inputs: requirements.txt
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+      - name: Build image
+        run: docker build -t agi-platform:${{ github.sha }} .
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: agi-platform:${{ github.sha }}
+          output-file: sbom.spdx.json
+      - name: Container vulnerability scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: agi-platform:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign image digest when publishing
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "cosign sign --yes <registry>/agi-platform@<digest>"

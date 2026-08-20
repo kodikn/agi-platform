@@ -114,7 +114,11 @@ class PlatformService:
         self.tool_registry = ToolRegistry()
 
     def health(self) -> dict[str, Any]:
-        return {"status": "ok", "levels": len(PLATFORM_LEVELS), "timestamp": int(time.time())}
+        return {
+            "status": "ok",
+            "levels": len(PLATFORM_LEVELS),
+            "timestamp": int(time.time()),
+        }
 
     def levels(self) -> list[dict[str, Any]]:
         return [asdict(level) for level in PLATFORM_LEVELS]
@@ -123,7 +127,10 @@ class PlatformService:
         return asdict(get_level(level))
 
     def competitive_advantages(self) -> dict[str, Any]:
-        return {"sources": competitive_strengths(), "count": len(competitive_strengths())}
+        return {
+            "sources": competitive_strengths(),
+            "count": len(competitive_strengths()),
+        }
 
     def tools(self) -> dict[str, Any]:
         return self.tool_registry.list_tools()
@@ -133,41 +140,111 @@ class PlatformService:
 
     def chat(self, request: ChatRequest) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="0", operation="chat"):
+            started = time.perf_counter()
             result = self.llm.complete(request.message, request.model, request.stream)
-            self.telemetry.increment("tokens_used", result["usage"]["input_tokens"] + result["usage"]["output_tokens"], level="0")
-            self.telemetry.increment("cost", result["metrics"]["cost"], level="0")
+            latency_ms = round((time.perf_counter() - started) * 1000, 3)
+            self.telemetry.increment(
+                "llm_calls_total",
+                provider=result.get("provider", "unknown"),
+                model=result.get("model", "unknown"),
+            )
+            self.telemetry.observe(
+                "llm_latency_ms", latency_ms, provider=result.get("provider", "unknown")
+            )
+            self.telemetry.increment(
+                "llm_tokens_total",
+                result["usage"]["input_tokens"] + result["usage"]["output_tokens"],
+                provider=result.get("provider", "unknown"),
+            )
+            self.telemetry.increment(
+                "llm_cost_total",
+                result["metrics"]["cost"],
+                provider=result.get("provider", "unknown"),
+            )
             return result
 
     def embeddings(self, request: EmbeddingRequest) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="0", operation="embeddings"):
-            return self.llm.embeddings(request.text)
+            started = time.perf_counter()
+            result = self.llm.embeddings(request.text)
+            self.telemetry.observe(
+                "llm_latency_ms",
+                round((time.perf_counter() - started) * 1000, 3),
+                provider=result.get("provider", "unknown"),
+                operation="embeddings",
+            )
+            return result
 
-    def store_memory(self, request: MemoryRequest, context: TenantContext) -> dict[str, Any]:
-        with self.telemetry.timer("level_operation", level="1", operation="store_memory"):
-            record = self.memory.store(request.content, request.memory_type, request.metadata, context)
+    def store_memory(
+        self, request: MemoryRequest, context: TenantContext
+    ) -> dict[str, Any]:
+        with self.telemetry.timer(
+            "level_operation", level="1", operation="store_memory"
+        ):
+            started = time.perf_counter()
+            record = self.memory.store(
+                request.content, request.memory_type, request.metadata, context
+            )
+            self.telemetry.observe(
+                "memory_latency_ms",
+                round((time.perf_counter() - started) * 1000, 3),
+                operation="store",
+            )
             self.guardian.version(record)
             self.telemetry.increment("memories_stored", level="1")
             return record
 
-    def search_memory(self, request: QueryRequest, context: TenantContext) -> dict[str, Any]:
-        with self.telemetry.timer("level_operation", level="1", operation="search_memory"):
-            return self.memory.search(request.query, request.limit, context)
+    def search_memory(
+        self, request: QueryRequest, context: TenantContext
+    ) -> dict[str, Any]:
+        with self.telemetry.timer(
+            "level_operation", level="1", operation="search_memory"
+        ):
+            started = time.perf_counter()
+            result = self.memory.search(request.query, request.limit, context)
+            self.telemetry.observe(
+                "memory_latency_ms",
+                round((time.perf_counter() - started) * 1000, 3),
+                operation="search",
+            )
+            return result
 
-    def validate_memory(self, request: MemoryRequest, context: TenantContext) -> dict[str, Any]:
-        with self.telemetry.timer("level_operation", level="2", operation="validate_memory"):
-            candidate = self.memory.store(request.content, request.memory_type, request.metadata, context)
-            result = self.guardian.validate(candidate, list(self.memory.records.values()))
+    def validate_memory(
+        self, request: MemoryRequest, context: TenantContext
+    ) -> dict[str, Any]:
+        with self.telemetry.timer(
+            "level_operation", level="2", operation="validate_memory"
+        ):
+            candidate = self.memory.store(
+                request.content, request.memory_type, request.metadata, context
+            )
+            result = self.guardian.validate(
+                candidate, list(self.memory.records.values())
+            )
             self.telemetry.increment("memory_reviews", level="2")
             return result
 
     def research_report(self, request: QueryRequest) -> dict[str, Any]:
-        with self.telemetry.timer("level_operation", level="3", operation="research_report"):
+        with self.telemetry.timer(
+            "level_operation", level="3", operation="research_report"
+        ):
             return self.research.report(request.query)
 
     def analyze_code(self, code: str) -> dict[str, Any]:
-        with self.telemetry.timer("level_operation", level="5", operation="analyze_code"):
+        with self.telemetry.timer(
+            "level_operation", level="5", operation="analyze_code"
+        ):
             return self.analysis.analyze_code(code)
 
     def improvement_proposals(self) -> dict[str, Any]:
-        with self.telemetry.timer("level_operation", level="11", operation="improvement_proposals"):
-            return self.evolution.evaluate({"success_rate": 0.94, "failure_rate": 0.06, "tool_effectiveness": 0.79, "agent_effectiveness": 0.9})
+        with self.telemetry.timer(
+            "level_operation", level="11", operation="improvement_proposals"
+        ):
+            return self.evolution.evaluate(
+                {
+                    "success_rate": 0.94,
+                    "failure_rate": 0.06,
+                    "tool_effectiveness": 0.79,
+                    "agent_effectiveness": 0.9,
+                }
+            )

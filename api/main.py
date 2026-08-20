@@ -244,6 +244,22 @@ def orchestrate(request: WorkflowRequest):
     return service.workflow.plan(request.task, request.agents or None)
 
 
+@app.post("/orchestrate/{checkpoint}/execute")
+def orchestrate_execute(checkpoint: str):
+    try:
+        return service.workflow.execute(checkpoint)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/orchestrate/{checkpoint}/recover")
+def orchestrate_recover(checkpoint: str):
+    try:
+        return service.workflow.recover(checkpoint)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/governance/proposals")
 def governance_proposals(request: GovernanceProposalRequest):
     return service.governance.propose(request.title, request.body, request.risk_score)

@@ -58,3 +58,20 @@ api.main
 6. Add persistent memory/evidence/graph ownership and migrations.
 7. Harden external integrations with SSRF controls, retries, circuit breakers, and telemetry.
 8. Complete Docker/Kubernetes/CI/security gates and production certification.
+
+## 2026-08-20 Phase 1 security foundation delta
+
+Implemented in this change set:
+
+- Added a tenant-aware API key record parser for `AGI_API_KEYS` JSON credentials and retained `AGI_API_KEY` only as a legacy full-access compatibility key.
+- Added explicit route-to-permission mapping for protected API operations, including high-risk sandbox, GitHub, graph, orchestration, governance, and evolution endpoints.
+- Added request-scoped identity and tenant context from `X-API-Key` and `X-Tenant-ID`; mismatched tenant headers fail closed.
+- Added canonical API errors shaped as `error.code`, `error.message`, and `error.request_id`; 5xx handlers return sanitized messages rather than raw exception text.
+- Added an outbound URL policy primitive that allows only HTTP/HTTPS and denies loopback, RFC1918, link-local, metadata, reserved, and unsafe schemes after DNS resolution.
+
+Still not production-ready:
+
+- Identity, tenants, roles, permissions, and API keys are not yet backed by Postgres migrations or rotation/audit workflows.
+- Authorization decisions are route-scoped but not yet resource-level ABAC with durable policy events.
+- SSRF policy is implemented as a reusable control and regression-tested, but all external integrations still need to adopt redirect-by-redirect streaming enforcement.
+- Rate limiting remains in-process and must move to Redis or edge enforcement for multi-replica deployments.

@@ -9,6 +9,7 @@ class Settings:
     environment: str
     service_name: str
     api_key: str | None
+    api_keys: str | None
     rate_limit_per_minute: int
     database_url: str
     qdrant_url: str
@@ -21,6 +22,7 @@ class Settings:
             environment=os.getenv("AGI_ENV", "production"),
             service_name=os.getenv("AGI_SERVICE_NAME", "agi-platform"),
             api_key=os.getenv("AGI_API_KEY"),
+            api_keys=os.getenv("AGI_API_KEYS"),
             rate_limit_per_minute=int(os.getenv("AGI_RATE_LIMIT_PER_MINUTE", "120")),
             database_url=os.getenv("DATABASE_URL", "postgresql://agi:agi@postgres:5432/agi"),
             qdrant_url=os.getenv("QDRANT_URL", "http://qdrant:6333"),

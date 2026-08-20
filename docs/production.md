@@ -50,3 +50,24 @@ When an integration is not configured or a remote API is unavailable, the API re
 - Підтвердіть, що `/live` лишається lightweight і не залежить від databases або remote providers.
 - Налаштуйте dashboards і alerts з `/metrics` перед увімкненням production traffic.
 - Зафіксуйте database migrations і перевірте rollback/restore procedures перед deployment.
+
+## Phase 1 security foundation status
+
+`AGI_API_KEYS` can now define scoped tenant API keys as a JSON list. Each item must include `key`, `tenant_id`, and `permissions`; optional fields are `key_id`, `subject`, and `roles`. `AGI_API_KEY` remains supported only as a legacy full-access compatibility key and should not be used for new production deployments.
+
+Protected routes now require an explicit permission when authorization is configured. High-risk routes under `/sandbox`, `/orchestrate`, `/github`, `/graph`, `/governance`, and `/evolution` fail closed when no authorization credentials are configured. API error responses use a canonical sanitized envelope with `error.code`, `error.message`, and `error.request_id`.
+
+Example development-only scoped key configuration:
+
+```json
+[
+  {
+    "key": "replace-with-secret-value",
+    "key_id": "svc-platform-admin-1",
+    "subject": "platform-admin",
+    "tenant_id": "tenant-a",
+    "roles": ["admin"],
+    "permissions": ["*"]
+  }
+]
+```

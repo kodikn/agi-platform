@@ -144,8 +144,27 @@ def apply_production_headers(response, service_name: str):
     return response
 
 
+def is_public_path(path: str) -> bool:
+    return path in public_paths() or path.startswith("/architecture/levels/")
+
+
 def public_paths() -> set[str]:
-    return {"/", "/health", "/live", "/ready", "/metrics", "/docs", "/openapi.json", "/redoc"}
+    return {
+        "/",
+        "/health",
+        "/live",
+        "/ready",
+        "/metrics",
+        "/security/policy",
+        "/architecture/levels",
+        "/architecture/readiness",
+        "/architecture/competitive-advantages",
+        "/tools",
+        "/mcp/manifest",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
 
 
 BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}

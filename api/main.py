@@ -10,6 +10,7 @@ from agi_platform.security import (
     authenticate_request,
     canonical_error,
     parse_api_keys,
+    is_public_path,
     public_paths,
     request_id,
     route_permission,
@@ -47,7 +48,7 @@ async def production_controls(request: Request, call_next):
         response.headers["X-Request-ID"] = rid
         return apply_production_headers(response, settings.service_name)
 
-    if request.url.path not in public_paths():
+    if not is_public_path(request.url.path):
         permission = route_permission(request.method, request.url.path)
         if api_keys:
             identity = authenticate_request(request, api_keys)
@@ -75,7 +76,7 @@ async def production_controls(request: Request, call_next):
 async def http_exception_handler(request: Request, exc: HTTPException):
     rid = getattr(request.state, "request_id", request_id())
     code_by_status = {401: "unauthenticated", 403: "forbidden", 404: "not_found", 422: "invalid_request", 503: "service_unavailable"}
-    message = exc.detail if isinstance(exc.detail, str) and exc.status_code < 500 else "Request could not be completed."
+    message = exc.detail if isinstance(exc.detail, str) and (exc.status_code < 500 or exc.status_code == 503) else "Request could not be completed."
     response = canonical_error(code_by_status.get(exc.status_code, "request_error"), message, rid, exc.status_code)
     response.headers["X-Request-ID"] = rid
     return apply_production_headers(response, settings.service_name)

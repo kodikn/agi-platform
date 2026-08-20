@@ -7,14 +7,15 @@ from api.main import app
 client = TestClient(app)
 
 
-def test_platform_readiness_covers_all_levels():
+def test_platform_readiness_reports_honest_production_controls():
     response = client.get("/ready")
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "ready"
+    assert body["status"] in {"not-ready", "degraded"}
     assert len(body["levels"]) == 12
-    assert all(level["status"] == "ready" for level in body["levels"])
+    assert any(level["status"] == "RED" for level in body["levels"])
     assert all(len(level["criteria"]) == 5 for level in body["levels"])
+    assert all(level["controls"] for level in body["levels"])
 
 
 def test_metrics_and_security_headers_are_exposed():
@@ -54,5 +55,7 @@ def test_compose_stack_has_local_healthchecks():
 
     assert "condition: service_healthy" in compose
     assert "http://localhost:8000/live" in compose
-    assert "pg_isready -U agi -d agi" in compose
+    assert "pg_isready -U $${POSTGRES_USER:-agi} -d $${POSTGRES_DB:-agi}" in compose
+    assert "${POSTGRES_PASSWORD:-agi}" in compose
+    assert "neo4j/${NEO4J_PASSWORD:-agi-platform}" in compose
     assert "redis-cli" in compose

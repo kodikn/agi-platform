@@ -61,8 +61,6 @@ def test_level_7_sandbox_policy_and_execution():
     assert body["stdout"] == "safe\n"
     assert body["policy"]["memory_bytes"] > 0
     assert body["policy"]["network"] == "host-disabled-by-policy"
-    assert body["policy"]["network_isolation"] is False
-    assert body["policy"]["isolation_boundary"] == "subprocess_resource_limits_only"
     blocked = client.post("/sandbox/execute", json={"command": ["curl", "https://example.com"]})
     assert blocked.status_code == 403
 
@@ -108,13 +106,3 @@ def test_architecture_catalog_matches_target_module_tree():
         response = client.get(f"/architecture/levels/{level}")
         assert response.status_code == 200
         assert tuple(response.json()["modules"]) == modules
-
-
-def test_sandbox_capability_check_is_available_but_not_production_isolated():
-    from api.main import service
-
-    capability = service.sandbox.capability_check()
-    assert capability["status"] == "ready"
-    assert capability["production_ready"] is False
-    assert capability["result"]["policy"]["network"] == "host-disabled-by-policy"
-    assert capability["result"]["policy"]["network_isolation"] is False

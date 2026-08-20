@@ -21,6 +21,7 @@ from .orchestration import WorkflowEngine
 from .research.core import ResearchLayer
 from .sandbox.core import SandboxLab
 from .telemetry import TelemetryRegistry
+from .tool_registry import ToolRegistry
 
 
 class ChatRequest(BaseModel):
@@ -109,6 +110,7 @@ class PlatformService:
         self.governance = ArchitectureGovernance()
         self.evolution = SelfImprovementEngine()
         self.telemetry = TelemetryRegistry()
+        self.tool_registry = ToolRegistry()
 
     def health(self) -> dict[str, Any]:
         return {"status": "ok", "levels": len(PLATFORM_LEVELS), "timestamp": int(time.time())}
@@ -121,6 +123,12 @@ class PlatformService:
 
     def competitive_advantages(self) -> dict[str, Any]:
         return {"sources": competitive_strengths(), "count": len(competitive_strengths())}
+
+    def tools(self) -> dict[str, Any]:
+        return self.tool_registry.list_tools()
+
+    def mcp_manifest(self) -> dict[str, Any]:
+        return self.tool_registry.mcp_manifest()
 
     def chat(self, request: ChatRequest) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="0", operation="chat"):

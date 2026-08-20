@@ -88,6 +88,16 @@ def architecture_competitive_advantages():
     return service.competitive_advantages()
 
 
+@app.get("/tools")
+def tools():
+    return service.tools()
+
+
+@app.get("/mcp/manifest")
+def mcp_manifest():
+    return service.mcp_manifest()
+
+
 @app.get("/architecture/levels/{level}")
 def level(level: int):
     try:

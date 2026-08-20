@@ -18,8 +18,11 @@ Request flow is: request → authentication → identity → tenant context → 
 * Bootstrap plaintext keys in environment variables are accepted for local tests; production should provision only `key_hash` values through a secret manager.
 * Approval context currently checks the presence of an approval identifier; production should verify approval records cryptographically or in a durable workflow.
 
+
 ## Durable database migration notes
 
 Migrations use additive SQL files under `migrations/` to stay compatible with the repository's current migration mechanism. `003_durable_application_state.sql` is intentionally non-destructive: it creates missing tables/indexes and adds nullable/defaulted columns needed for durable memory and workflow metadata. Existing rows with missing `tenant_id` must be backfilled to an explicit legacy tenant before any future migration tightens `tenant_id` to `NOT NULL` on old prototype tables.
 
 PostgreSQL is the production source of truth for memory metadata, workflow state, audit events, governance decisions, LLM accounting, sandbox runs, and research evidence. Qdrant stores vectors only; when Qdrant is unavailable, memory writes still persist metadata with `embedding_id = null` and audit metadata records the degraded vector state.
+
+ main

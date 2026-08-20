@@ -83,6 +83,11 @@ def architecture_readiness():
     return platform_ready()["levels"]
 
 
+@app.get("/architecture/competitive-advantages")
+def architecture_competitive_advantages():
+    return service.competitive_advantages()
+
+
 @app.get("/architecture/levels/{level}")
 def level(level: int):
     try:

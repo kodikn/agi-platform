@@ -72,3 +72,20 @@ Level 10 Governance
           ▼
 Level 11 Self Improvement
 ```
+
+
+## Запозичені сильні сторони з GitHub-аналогів
+
+Платформа додає найсильніші ідеї з провідних open-source agent projects як runtime capabilities, а не лише як roadmap:
+
+| Джерело | Сильна сторона | Як додано в AGI Platform |
+| --- | --- | --- |
+| LangGraph | Stateful graph orchestration, checkpoints, recovery | `POST /orchestrate` повертає `graph` із nodes, edges, checkpoint і recovery flag. |
+| CrewAI | Role-based crews and flows | Workflow містить `crew` із agents і flow `plan -> execute -> review -> govern`. |
+| AutoGen | Multi-agent conversation programming | Workflow містить `conversation` handoff trace між user і agents. |
+| AutoGPT | Tool ecosystem / marketplace extensibility | Capability catalog містить `tool_marketplace` як platform extension point. |
+| MetaGPT | Software-company SOP roles | Default agents отримують architect/implementer/reviewer SOP roles. |
+| ChatDev | Zero-code workflow description | Workflow містить `zero_code_contract`, який можна згенерувати з UI або declarative builder. |
+| FastAPI LangGraph template | Production backend controls | Deployment і API використовують probes, metrics, auth policy і hardened manifests. |
+
+Ці capabilities доступні через `GET /architecture/competitive-advantages` і додаються до кожного нового workflow у полі `competitive_capabilities`.

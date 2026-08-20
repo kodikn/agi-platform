@@ -46,7 +46,7 @@ When an integration is not configured or a remote API is unavailable, the API re
 - Увімкніть readiness, liveness і startup probes для API deployment.
 - Задайте CPU/memory requests і limits для кожного container.
 - Запускайте containers як non-root там, де це можливо, і drop unnecessary Linux capabilities.
-- Підтвердіть, що `/ready` повертає `ready` лише після успішного import усіх level implementations і required dependencies.
+- Підтвердіть, що `/ready` повертає `ready` лише після успішного import усіх level implementations і required dependencies; для production також додайте dependency та capability probes, які виконують реальні операції проти Postgres, Redis, Neo4j, Qdrant і sandbox runtime.
 - Підтвердіть, що `/live` лишається lightweight і не залежить від databases або remote providers.
 - Налаштуйте dashboards і alerts з `/metrics` перед увімкненням production traffic.
 - Зафіксуйте database migrations і перевірте rollback/restore procedures перед deployment.

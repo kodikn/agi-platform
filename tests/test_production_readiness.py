@@ -54,5 +54,7 @@ def test_compose_stack_has_local_healthchecks():
 
     assert "condition: service_healthy" in compose
     assert "http://localhost:8000/live" in compose
-    assert "pg_isready -U agi -d agi" in compose
+    assert "pg_isready -U $${POSTGRES_USER:-agi} -d $${POSTGRES_DB:-agi}" in compose
+    assert "${POSTGRES_PASSWORD:-agi}" in compose
+    assert "neo4j/${NEO4J_PASSWORD:-agi-platform}" in compose
     assert "redis-cli" in compose

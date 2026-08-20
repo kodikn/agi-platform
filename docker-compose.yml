@@ -3,15 +3,41 @@ services:
     build: .
     ports:
       - "8000:8000"
+    environment:
+      AGI_ENV: production
+      DATABASE_URL: postgresql://agi:agi@postgres:5432/agi
+      QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - postgres
+      - qdrant
+      - redis
+      - neo4j
 
   postgres:
     image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_PASSWORD: agi
+      POSTGRES_USER: agi
+      POSTGRES_DB: agi
+    ports:
+      - "5432:5432"
 
   qdrant:
-    image: qdrant/qdrant
+    image: qdrant/qdrant:v1.15.1
+    ports:
+      - "6333:6333"
 
   redis:
     image: redis:7
+    ports:
+      - "6379:6379"
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/agi-platform
+    ports:
+      - "7474:7474"
+      - "7687:7687"

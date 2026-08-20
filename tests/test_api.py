@@ -74,3 +74,22 @@ def test_mcp_manifest_lists_approved_tools():
     assert body["capabilities"]["tools"] is True
     names = {tool["name"] for tool in body["tools"]}
     assert {"memory.search", "research.report", "sandbox.execute"}.issubset(names)
+
+
+def test_orchestrator_executes_and_recovers_persistent_workflow():
+    planned = client.post("/orchestrate", json={"task": "deliver executable workflow", "agents": ["architect", "implementer"]})
+    assert planned.status_code == 200
+    checkpoint = planned.json()["checkpoint"]
+
+    executed = client.post(f"/orchestrate/{checkpoint}/execute")
+    assert executed.status_code == 200
+    body = executed.json()
+    assert body["status"] == "completed"
+    assert all(step["status"] == "completed" for step in body["steps"])
+    assert body["events"][-1]["type"] == "workflow.completed"
+    assert body["graph"]["state_store"]
+
+    recovered = client.post(f"/orchestrate/{checkpoint}/recover")
+    assert recovered.status_code == 200
+    assert recovered.json()["status"] == "recovered"
+    assert recovered.json()["checkpoint"] == checkpoint

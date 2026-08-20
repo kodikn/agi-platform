@@ -1,11 +1,13 @@
 import pytest
 
 from agi_platform.domain import (
+    DomainConcurrencyError,
     DomainStateError,
     Event,
     EventType,
     Task,
     TaskState,
+    ToolPermission,
     Workflow,
     WorkflowState,
 )
@@ -51,3 +53,42 @@ def test_event_shape_is_tenant_aware_correlatable_and_immutable():
     assert event.tenant_id == "tenant_a"
     with pytest.raises(Exception):
         event.tenant_id = "tenant_b"
+
+
+def test_workflow_transition_returns_actor_attributed_audit_event():
+    workflow = Workflow(id="wf_2", tenant_id="tenant_a")
+    event = workflow.transition_to(
+        WorkflowState.PLANNED,
+        actor_id="user_1",
+        expected_version=1,
+        correlation_id="corr_2",
+        request_id="req_2",
+    )
+    assert event.event_type == EventType.WORKFLOW_STATE_TRANSITIONED
+    assert event.workflow_id == "wf_2"
+    assert event.actor_id == "user_1"
+    assert event.correlation_id == "corr_2"
+    assert event.payload == {
+        "from_state": "CREATED",
+        "to_state": "PLANNED",
+        "entity_version": 2,
+    }
+
+
+def test_task_transition_uses_optimistic_concurrency():
+    task = Task(id="task_2", tenant_id="tenant_a", workflow_id="wf_2")
+    with pytest.raises(DomainConcurrencyError):
+        task.transition_to(TaskState.READY, expected_version=99)
+
+
+def test_tool_permission_is_tenant_scoped_domain_object():
+    permission = ToolPermission(
+        id="perm_1",
+        tenant_id="tenant_a",
+        tool_id="tool_1",
+        capability="sandbox:execute",
+        risk_level="HIGH",
+    )
+    assert permission.tenant_id == "tenant_a"
+    assert permission.action == "execute"
+    assert permission.version == 1

@@ -11,6 +11,10 @@ class DomainStateError(ValueError):
     """Raised when a domain object is asked to perform an invalid state transition."""
 
 
+class DomainConcurrencyError(ValueError):
+    """Raised when optimistic concurrency detects a stale domain version."""
+
+
 class LifecycleState(StrEnum):
     CREATED = "CREATED"
     ACTIVE = "ACTIVE"
@@ -69,12 +73,14 @@ TASK_TRANSITIONS: dict[TaskState, set[TaskState]] = {
 
 class EventType(StrEnum):
     WORKFLOW_CREATED = "WorkflowCreated"
+    WORKFLOW_STATE_TRANSITIONED = "WorkflowStateTransitioned"
     WORKFLOW_STARTED = "WorkflowStarted"
     WORKFLOW_PAUSED = "WorkflowPaused"
     WORKFLOW_RESUMED = "WorkflowResumed"
     WORKFLOW_COMPLETED = "WorkflowCompleted"
     WORKFLOW_FAILED = "WorkflowFailed"
     TASK_CREATED = "TaskCreated"
+    TASK_STATE_TRANSITIONED = "TaskStateTransitioned"
     TASK_STARTED = "TaskStarted"
     TASK_RETRIED = "TaskRetried"
     TASK_COMPLETED = "TaskCompleted"
@@ -169,6 +175,14 @@ class Agent(TenantScopedEntity):
 
 
 @dataclass
+class ToolPermission(TenantScopedEntity):
+    tool_id: str = ""
+    capability: str = ""
+    action: str = "execute"
+    risk_level: str = "LOW"
+
+
+@dataclass
 class Tool(TenantScopedEntity):
     name: str = ""
     description: str = ""
@@ -185,11 +199,31 @@ class Workflow(TenantScopedEntity):
     state: WorkflowState = WorkflowState.CREATED
     idempotency_key: str | None = None
 
-    def transition_to(self, target: WorkflowState) -> None:
+    def transition_to(
+        self,
+        target: WorkflowState,
+        *,
+        actor_id: str | None = None,
+        expected_version: int | None = None,
+        correlation_id: str | None = None,
+        request_id: str | None = None,
+    ) -> "Event":
+        previous_state = self.state
+        if expected_version is not None and expected_version != self.version:
+            raise DomainConcurrencyError(f"workflow {self.id} expected version {expected_version}, current version {self.version}")
         if target not in WORKFLOW_TRANSITIONS[self.state]:
             raise DomainStateError(f"workflow cannot transition from {self.state} to {target}")
         self.state = target
         self.touch()
+        return Event(
+            event_type=EventType.WORKFLOW_STATE_TRANSITIONED,
+            tenant_id=self.tenant_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            workflow_id=self.id,
+            actor_id=actor_id,
+            payload={"from_state": previous_state.value, "to_state": target.value, "entity_version": self.version},
+        )
 
 
 @dataclass
@@ -198,11 +232,32 @@ class Task(TenantScopedEntity):
     state: TaskState = TaskState.PENDING
     idempotency_key: str | None = None
 
-    def transition_to(self, target: TaskState) -> None:
+    def transition_to(
+        self,
+        target: TaskState,
+        *,
+        actor_id: str | None = None,
+        expected_version: int | None = None,
+        correlation_id: str | None = None,
+        request_id: str | None = None,
+    ) -> "Event":
+        previous_state = self.state
+        if expected_version is not None and expected_version != self.version:
+            raise DomainConcurrencyError(f"task {self.id} expected version {expected_version}, current version {self.version}")
         if target not in TASK_TRANSITIONS[self.state]:
             raise DomainStateError(f"task cannot transition from {self.state} to {target}")
         self.state = target
         self.touch()
+        return Event(
+            event_type=EventType.TASK_STATE_TRANSITIONED,
+            tenant_id=self.tenant_id,
+            correlation_id=correlation_id,
+            request_id=request_id,
+            workflow_id=self.workflow_id,
+            task_id=self.id,
+            actor_id=actor_id,
+            payload={"from_state": previous_state.value, "to_state": target.value, "entity_version": self.version},
+        )
 
 
 @dataclass(frozen=True)

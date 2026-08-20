@@ -141,21 +141,22 @@ class PlatformService:
         with self.telemetry.timer("level_operation", level="0", operation="embeddings"):
             return self.llm.embeddings(request.text)
 
-    def store_memory(self, request: MemoryRequest) -> dict[str, Any]:
+    def store_memory(self, request: MemoryRequest, tenant_id: str = "default") -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="1", operation="store_memory"):
-            record = self.memory.store(request.content, request.memory_type, request.metadata)
+            record = self.memory.store(request.content, request.memory_type, request.metadata, tenant_id=tenant_id)
             self.guardian.version(record)
             self.telemetry.increment("memories_stored", level="1")
             return record
 
-    def search_memory(self, request: QueryRequest) -> dict[str, Any]:
+    def search_memory(self, request: QueryRequest, tenant_id: str = "default") -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="1", operation="search_memory"):
-            return self.memory.search(request.query, request.limit)
+            return self.memory.search(request.query, request.limit, tenant_id=tenant_id)
 
-    def validate_memory(self, request: MemoryRequest) -> dict[str, Any]:
+    def validate_memory(self, request: MemoryRequest, tenant_id: str = "default") -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="2", operation="validate_memory"):
-            candidate = self.memory.store(request.content, request.memory_type, request.metadata)
-            result = self.guardian.validate(candidate, list(self.memory.records.values()))
+            candidate = self.memory.store(request.content, request.memory_type, request.metadata, tenant_id=tenant_id)
+            tenant_records = [record for record in self.memory.records.values() if record.get("tenant_id") == tenant_id]
+            result = self.guardian.validate(candidate, tenant_records)
             self.telemetry.increment("memory_reviews", level="2")
             return result
 

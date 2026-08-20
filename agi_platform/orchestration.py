@@ -25,9 +25,9 @@ class WorkflowStateStore:
         workflows.append(workflow)
         self._write(workflows)
 
-    def get(self, checkpoint: str) -> dict[str, Any]:
+    def get(self, checkpoint: str, tenant_id: str | None = None) -> dict[str, Any]:
         for workflow in self.list():
-            if workflow.get("checkpoint") == checkpoint:
+            if workflow.get("checkpoint") == checkpoint and (tenant_id is None or workflow.get("tenant_id") == tenant_id):
                 return workflow
         raise KeyError(f"checkpoint {checkpoint} not found")
 
@@ -54,9 +54,13 @@ class WorkflowEngine:
     state_store: WorkflowStateStore = field(default_factory=WorkflowStateStore)
     runs: list[dict[str, Any]] = field(default_factory=list)
 
-    def plan(self, task: str, agents: list[str] | None = None) -> dict[str, Any]:
+    def plan(self, task: str, agents: list[str] | None = None, tenant_id: str = "default", idempotency_key: str | None = None) -> dict[str, Any]:
         agents = agents or ["architect", "implementer", "reviewer"]
-        checkpoint = f"checkpoint-{len(self.state_store.list()) + 1}"
+        if idempotency_key:
+            for existing in self.state_store.list():
+                if existing.get("tenant_id") == tenant_id and existing.get("idempotency_key") == idempotency_key:
+                    return existing
+        checkpoint = f"{tenant_id}-checkpoint-{len(self.state_store.list()) + 1}"
         now = int(time.time())
         steps = [
             {
@@ -71,6 +75,8 @@ class WorkflowEngine:
             for index, agent in enumerate(agents)
         ]
         workflow = {
+            "tenant_id": tenant_id,
+            "idempotency_key": idempotency_key,
             "task": task,
             "steps": steps,
             "checkpoint": checkpoint,
@@ -88,8 +94,8 @@ class WorkflowEngine:
         self.state_store.append(workflow)
         return workflow
 
-    def execute(self, checkpoint: str) -> dict[str, Any]:
-        workflow = self.state_store.get(checkpoint)
+    def execute(self, checkpoint: str, tenant_id: str = "default") -> dict[str, Any]:
+        workflow = self.state_store.get(checkpoint, tenant_id)
         if workflow["status"] not in {"planned", "recovered", "running"}:
             return workflow
         workflow["status"] = "running"
@@ -138,8 +144,8 @@ class WorkflowEngine:
     def competitive_blueprint(self) -> list[dict[str, Any]]:
         return [strength.__dict__ for strength in COMPETITIVE_STRENGTHS]
 
-    def recover(self, checkpoint: str) -> dict[str, Any]:
-        workflow = self.state_store.get(checkpoint)
+    def recover(self, checkpoint: str, tenant_id: str = "default") -> dict[str, Any]:
+        workflow = self.state_store.get(checkpoint, tenant_id)
         recovered = {**workflow, "status": "recovered", "updated_at": int(time.time())}
         self.state_store.update(recovered)
         return recovered

@@ -1,10 +1,14 @@
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from api.main import app
 
 client = TestClient(app)
+AUTH = {"X-API-Key": "test-admin-key", "X-Tenant-ID": "tenant-a"}
 
 
 def test_platform_readiness_reports_honest_production_controls():
@@ -19,7 +23,7 @@ def test_platform_readiness_reports_honest_production_controls():
 
 
 def test_metrics_and_security_headers_are_exposed():
-    client.post("/memory/store", json={"content": "collect production metrics", "memory_type": "semantic"})
+    client.post("/memory/store", headers=AUTH, json={"content": "collect production metrics", "memory_type": "semantic"})
     metrics = client.get("/metrics")
     assert metrics.status_code == 200
     assert "memories_stored" in metrics.text

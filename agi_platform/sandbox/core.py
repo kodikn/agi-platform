@@ -46,7 +46,7 @@ class SandboxLab:
     runs: list[dict] = field(default_factory=list)
     policy: SandboxPolicy = field(default_factory=SandboxPolicy)
 
-    def execute(self, command: list[str], timeout_seconds: int = 5) -> dict:
+    def execute(self, command: list[str], timeout_seconds: int = 5, tenant_id: str = "default") -> dict:
         timeout = self.policy.validate(command, timeout_seconds)
         started = time.perf_counter()
         with tempfile.TemporaryDirectory(prefix="agi-sandbox-") as workspace:
@@ -65,6 +65,7 @@ class SandboxLab:
                 stdout = completed.stdout[: self.policy.max_output_bytes]
                 stderr = completed.stderr[: self.policy.max_output_bytes]
                 result = {
+                    "tenant_id": tenant_id,
                     "command": command,
                     "returncode": completed.returncode,
                     "stdout": stdout,
@@ -76,6 +77,7 @@ class SandboxLab:
                 }
             except subprocess.TimeoutExpired as exc:
                 result = {
+                    "tenant_id": tenant_id,
                     "command": command,
                     "returncode": 124,
                     "stdout": (exc.stdout or "")[: self.policy.max_output_bytes],
@@ -90,7 +92,7 @@ class SandboxLab:
         return result
 
     def capability_check(self) -> dict:
-        result = self.execute(["echo", "sandbox-ready"], timeout_seconds=1)
+        result = self.execute(["echo", "sandbox-ready"], timeout_seconds=1, tenant_id="readiness")
         return {"status": "ready" if result["stdout"] == "sandbox-ready\n" else "not-ready", "result": result}
 
     def _apply_process_limits(self) -> None:

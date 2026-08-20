@@ -1,10 +1,19 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from agi_platform.config import settings
 from agi_platform.readiness import platform_ready
-from agi_platform.security import RateLimiter, apply_production_headers, public_paths
+from agi_platform.security import (
+    RateLimiter,
+    apply_production_headers,
+    authenticate_request,
+    canonical_error,
+    parse_api_keys,
+    public_paths,
+    request_id,
+    route_permission,
+)
 from agi_platform.services import (
     ChatRequest,
     ChineseArticleRequest,
@@ -25,18 +34,64 @@ from agi_platform.services import (
 app = FastAPI(title="AGI Platform", version="0.3.0")
 service = PlatformService()
 rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+api_keys = parse_api_keys(getattr(settings, "api_keys", None), settings.api_key)
 
 
 @app.middleware("http")
 async def production_controls(request: Request, call_next):
-    identity = request.client.host if request.client else "unknown"
-    if not rate_limiter.allow(identity):
-        return apply_production_headers(JSONResponse(status_code=429, content={"detail": "rate limit exceeded"}), settings.service_name)
-    if settings.api_key and request.url.path not in public_paths():
-        if request.headers.get("X-API-Key") != settings.api_key:
-            return apply_production_headers(JSONResponse(status_code=401, content={"detail": "invalid API key"}), settings.service_name)
+    rid = request.headers.get("X-Request-ID") or request_id()
+    request.state.request_id = rid
+    identity_key = request.headers.get("X-API-Key") or (request.client.host if request.client else "unknown")
+    if not rate_limiter.allow(identity_key):
+        response = canonical_error("rate_limited", "Rate limit exceeded.", rid, 429)
+        response.headers["X-Request-ID"] = rid
+        return apply_production_headers(response, settings.service_name)
+
+    if request.url.path not in public_paths():
+        permission = route_permission(request.method, request.url.path)
+        if api_keys:
+            identity = authenticate_request(request, api_keys)
+            if identity is None:
+                response = canonical_error("unauthenticated", "Valid API key required.", rid, 401)
+                response.headers["X-Request-ID"] = rid
+                return apply_production_headers(response, settings.service_name)
+            request.state.identity = identity
+            request.state.tenant_id = identity.tenant_id
+            if permission and not identity.can(permission):
+                response = canonical_error("forbidden", "Permission denied.", rid, 403)
+                response.headers["X-Request-ID"] = rid
+                return apply_production_headers(response, settings.service_name)
+        elif permission and request.url.path.startswith(("/sandbox", "/orchestrate", "/github", "/graph", "/governance", "/evolution")):
+            response = canonical_error("auth_not_configured", "Authorization must be configured for this endpoint.", rid, 503)
+            response.headers["X-Request-ID"] = rid
+            return apply_production_headers(response, settings.service_name)
+
     response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
     return apply_production_headers(response, settings.service_name)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    rid = getattr(request.state, "request_id", request_id())
+    code_by_status = {401: "unauthenticated", 403: "forbidden", 404: "not_found", 422: "invalid_request", 503: "service_unavailable"}
+    message = exc.detail if isinstance(exc.detail, str) and exc.status_code < 500 else "Request could not be completed."
+    response = canonical_error(code_by_status.get(exc.status_code, "request_error"), message, rid, exc.status_code)
+    response.headers["X-Request-ID"] = rid
+    return apply_production_headers(response, settings.service_name)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    rid = getattr(request.state, "request_id", request_id())
+    response = canonical_error("internal_error", "Request could not be completed.", rid, 500)
+    response.headers["X-Request-ID"] = rid
+    return apply_production_headers(response, settings.service_name)
+
+
+def tenant_id(request: Request) -> str:
+    identity = getattr(request.state, "identity", None)
+    return getattr(identity, "tenant_id", "default")
 
 
 class CodeAnalysisRequest(BaseModel):
@@ -111,7 +166,7 @@ def chat(request: ChatRequest):
     try:
         return service.chat(request)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="LLM provider unavailable") from exc
 
 
 @app.post("/completion")
@@ -119,7 +174,7 @@ def completion(request: ChatRequest):
     try:
         return service.chat(request)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="LLM provider unavailable") from exc
 
 
 @app.post("/embeddings")
@@ -127,7 +182,7 @@ def embeddings(request: EmbeddingRequest):
     try:
         return service.embeddings(request)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="LLM provider unavailable") from exc
 
 
 @app.get("/models")
@@ -136,28 +191,28 @@ def models():
 
 
 @app.post("/memory/store")
-def memory_store(request: MemoryRequest):
-    return service.store_memory(request)
+def memory_store(request: MemoryRequest, http_request: Request):
+    return service.store_memory(request, tenant_id(http_request))
 
 
 @app.post("/memory/search")
-def memory_search(request: QueryRequest):
-    return service.search_memory(request)
+def memory_search(request: QueryRequest, http_request: Request):
+    return service.search_memory(request, tenant_id(http_request))
 
 
 @app.post("/memory/retrieve")
-def memory_retrieve(request: QueryRequest):
-    return service.search_memory(request)
+def memory_retrieve(request: QueryRequest, http_request: Request):
+    return service.search_memory(request, tenant_id(http_request))
 
 
 @app.post("/memory/consolidate")
-def memory_consolidate():
-    return service.memory.consolidate()
+def memory_consolidate(http_request: Request):
+    return service.memory.consolidate(tenant_id(http_request))
 
 
 @app.post("/guardian/validate")
-def guardian_validate(request: MemoryRequest):
-    return service.validate_memory(request)
+def guardian_validate(request: MemoryRequest, http_request: Request):
+    return service.validate_memory(request, tenant_id(http_request))
 
 
 @app.get("/guardian/audit")
@@ -200,9 +255,9 @@ def github_repository(request: RepositoryRequest):
     try:
         return service.github.index_repository(request.url, request.dependencies)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="Invalid repository URL") from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="GitHub provider unavailable") from exc
 
 
 @app.get("/github/repositories/{owner}/{repo}")
@@ -214,48 +269,48 @@ def github_analyze(owner: str, repo: str):
 
 
 @app.post("/sandbox/execute")
-def sandbox_execute(request: SandboxRequest):
+def sandbox_execute(request: SandboxRequest, http_request: Request):
     try:
-        return service.sandbox.execute(request.command, request.timeout_seconds)
+        return service.sandbox.execute(request.command, request.timeout_seconds, tenant_id(http_request))
     except ValueError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(status_code=403, detail="Sandbox command denied") from exc
 
 
 @app.post("/graph/entities")
-def graph_entity(request: EntityRequest):
-    return service.graph.upsert_entity(request.entity_id, request.labels, request.properties)
+def graph_entity(request: EntityRequest, http_request: Request):
+    return service.graph.upsert_entity(request.entity_id, request.labels, request.properties, tenant_id(http_request))
 
 
 @app.post("/graph/relationships")
-def graph_relationship(request: RelationshipRequest):
+def graph_relationship(request: RelationshipRequest, http_request: Request):
     try:
-        return service.graph.relate(request.source, request.target, request.relationship, request.properties)
+        return service.graph.relate(request.source, request.target, request.relationship, request.properties, tenant_id(http_request))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/graph/search")
-def graph_search(request: QueryRequest):
-    return service.graph.search(request.query)
+def graph_search(request: QueryRequest, http_request: Request):
+    return service.graph.search(request.query, tenant_id(http_request), request.limit)
 
 
 @app.post("/orchestrate")
-def orchestrate(request: WorkflowRequest):
-    return service.workflow.plan(request.task, request.agents or None)
+def orchestrate(request: WorkflowRequest, http_request: Request):
+    return service.workflow.plan(request.task, request.agents or None, tenant_id(http_request), http_request.headers.get("Idempotency-Key"))
 
 
 @app.post("/orchestrate/{checkpoint}/execute")
-def orchestrate_execute(checkpoint: str):
+def orchestrate_execute(checkpoint: str, http_request: Request):
     try:
-        return service.workflow.execute(checkpoint)
+        return service.workflow.execute(checkpoint, tenant_id(http_request))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/orchestrate/{checkpoint}/recover")
-def orchestrate_recover(checkpoint: str):
+def orchestrate_recover(checkpoint: str, http_request: Request):
     try:
-        return service.workflow.recover(checkpoint)
+        return service.workflow.recover(checkpoint, tenant_id(http_request))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

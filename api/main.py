@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -7,6 +7,9 @@ from agi_platform.readiness import platform_ready
 from agi_platform.security import (
     RateLimiter,
     apply_production_headers,
+    AuditTrail,
+    PolicyEngine,
+    TenantContext,
     authenticate_request,
     canonical_error,
     parse_api_keys,
@@ -36,6 +39,15 @@ app = FastAPI(title="AGI Platform", version="0.3.0")
 service = PlatformService()
 rate_limiter = RateLimiter(settings.rate_limit_per_minute)
 api_keys = parse_api_keys(getattr(settings, "api_keys", None), settings.api_key)
+audit_trail = AuditTrail()
+policy_engine = PolicyEngine(audit_trail)
+
+
+def tenant_context(request: Request) -> TenantContext:
+    context = getattr(request.state, "tenant_context", None)
+    if context is None:
+        raise HTTPException(status_code=403, detail="Tenant context required.")
+    return context
 
 
 @app.middleware("http")
@@ -58,10 +70,15 @@ async def production_controls(request: Request, call_next):
                 return apply_production_headers(response, settings.service_name)
             request.state.identity = identity
             request.state.tenant_id = identity.tenant_id
-            if permission and not identity.can(permission):
-                response = canonical_error("forbidden", "Permission denied.", rid, 403)
-                response.headers["X-Request-ID"] = rid
-                return apply_production_headers(response, settings.service_name)
+            request.state.tenant_context = TenantContext(identity.tenant_id, identity, rid)
+            if permission:
+                decision = policy_engine.authorize(identity, request.state.tenant_context, permission, {"tenant_id": identity.tenant_id}, {"approved": request.headers.get("X-Approval-ID") is not None})
+                if decision.audit_required:
+                    audit_trail.record(identity.tenant_id, identity.subject, permission, request.url.path, "allowed" if decision.allowed else "denied", decision.reason, rid)
+                if not decision.allowed:
+                    response = canonical_error("forbidden", "Permission denied.", rid, 403)
+                    response.headers["X-Request-ID"] = rid
+                    return apply_production_headers(response, settings.service_name)
         elif permission and request.url.path.startswith(("/sandbox", "/orchestrate", "/github", "/graph", "/governance", "/evolution")):
             response = canonical_error("auth_not_configured", "Authorization must be configured for this endpoint.", rid, 503)
             response.headers["X-Request-ID"] = rid
@@ -187,28 +204,28 @@ def models():
 
 
 @app.post("/memory/store")
-def memory_store(request: MemoryRequest):
-    return service.store_memory(request)
+def memory_store(request: MemoryRequest, context: TenantContext = Depends(tenant_context)):
+    return service.store_memory(request, context)
 
 
 @app.post("/memory/search")
-def memory_search(request: QueryRequest):
-    return service.search_memory(request)
+def memory_search(request: QueryRequest, context: TenantContext = Depends(tenant_context)):
+    return service.search_memory(request, context)
 
 
 @app.post("/memory/retrieve")
-def memory_retrieve(request: QueryRequest):
-    return service.search_memory(request)
+def memory_retrieve(request: QueryRequest, context: TenantContext = Depends(tenant_context)):
+    return service.search_memory(request, context)
 
 
 @app.post("/memory/consolidate")
-def memory_consolidate():
-    return service.memory.consolidate()
+def memory_consolidate(context: TenantContext = Depends(tenant_context)):
+    return service.memory.consolidate(context)
 
 
 @app.post("/guardian/validate")
-def guardian_validate(request: MemoryRequest):
-    return service.validate_memory(request)
+def guardian_validate(request: MemoryRequest, context: TenantContext = Depends(tenant_context)):
+    return service.validate_memory(request, context)
 
 
 @app.get("/guardian/audit")
@@ -273,21 +290,21 @@ def sandbox_execute(request: SandboxRequest):
 
 
 @app.post("/graph/entities")
-def graph_entity(request: EntityRequest):
-    return service.graph.upsert_entity(request.entity_id, request.labels, request.properties)
+def graph_entity(request: EntityRequest, context: TenantContext = Depends(tenant_context)):
+    return service.graph.upsert_entity(context, request.entity_id, request.labels, request.properties)
 
 
 @app.post("/graph/relationships")
-def graph_relationship(request: RelationshipRequest):
+def graph_relationship(request: RelationshipRequest, context: TenantContext = Depends(tenant_context)):
     try:
-        return service.graph.relate(request.source, request.target, request.relationship, request.properties)
+        return service.graph.relate(context, request.source, request.target, request.relationship, request.properties)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/graph/search")
-def graph_search(request: QueryRequest):
-    return service.graph.search(request.query)
+def graph_search(request: QueryRequest, context: TenantContext = Depends(tenant_context)):
+    return service.graph.search(context, request.query)
 
 
 @app.post("/orchestrate")

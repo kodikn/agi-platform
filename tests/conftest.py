@@ -12,5 +12,8 @@ os.environ.setdefault(
     json.dumps([
         {"key": "test-admin-key", "key_id": "test-admin", "subject": "pytest", "tenant_id": "tenant-a", "roles": ["admin"], "permissions": ["*"]},
         {"key": "memory-reader-key", "key_id": "reader", "subject": "reader", "tenant_id": "tenant-a", "roles": ["reader"], "permissions": ["memory:read"]},
+        {"key": "tenant-b-key", "key_id": "tenant-b", "subject": "tenant-b", "tenant_id": "tenant-b", "roles": ["admin"], "permissions": ["*"]},
+        {"key": "revoked-key", "key_id": "revoked", "subject": "revoked", "tenant_id": "tenant-a", "roles": ["reader"], "permissions": ["memory.read"], "revoked": True},
+        {"key": "expired-key", "key_id": "expired", "subject": "expired", "tenant_id": "tenant-a", "roles": ["reader"], "permissions": ["memory.read"], "expires_at": 1},
     ]),
 )

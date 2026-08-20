@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from api.main import app
 
 client = TestClient(app)
-AUTH = {"X-API-Key": "test-admin-key", "X-Tenant-ID": "tenant-a"}
+AUTH = {"X-API-Key": "test-admin-key", "X-Tenant-ID": "tenant-a", "X-Approval-ID": "pytest-approval"}
 
 
 def test_level_0_llm_core_reports_real_provider_configuration():

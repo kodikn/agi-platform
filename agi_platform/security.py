@@ -5,13 +5,11 @@ import hmac
 import ipaddress
 import json
 import secrets
-import socket
 import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from fastapi import Request
@@ -358,37 +356,9 @@ BLOCKED_NETWORKS = tuple(
 
 
 def validate_outbound_url(url: str) -> str:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise ValueError("outbound URL scheme is not allowed")
-    if not parsed.hostname:
-        raise ValueError("outbound URL host is required")
-    host = parsed.hostname.strip().lower().rstrip(".")
-    if host in BLOCKED_HOSTS:
-        raise ValueError("outbound URL host is blocked")
-    try:
-        addresses = {
-            info[4][0]
-            for info in socket.getaddrinfo(
-                host,
-                parsed.port or (443 if parsed.scheme == "https" else 80),
-                type=socket.SOCK_STREAM,
-            )
-        }
-    except socket.gaierror as exc:
-        raise ValueError("outbound URL host could not be resolved") from exc
-    for address in addresses:
-        ip = ipaddress.ip_address(address)
-        if (
-            any(ip in network for network in BLOCKED_NETWORKS)
-            or ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-        ):
-            raise ValueError("outbound URL resolves to a blocked network")
-    return url
+    from agi_platform.outbound import validate_outbound_url as validate
+
+    return validate(url)
 
 
 def request_id() -> str:

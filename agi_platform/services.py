@@ -20,6 +20,7 @@ from .memory.core import MemoryLayer
 from .orchestration import WorkflowEngine
 from .research.core import ResearchLayer
 from .sandbox.core import SandboxLab
+from .security import TenantContext
 from .telemetry import TelemetryRegistry
 from .tool_registry import ToolRegistry
 
@@ -141,20 +142,20 @@ class PlatformService:
         with self.telemetry.timer("level_operation", level="0", operation="embeddings"):
             return self.llm.embeddings(request.text)
 
-    def store_memory(self, request: MemoryRequest) -> dict[str, Any]:
+    def store_memory(self, request: MemoryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="1", operation="store_memory"):
-            record = self.memory.store(request.content, request.memory_type, request.metadata)
+            record = self.memory.store(request.content, request.memory_type, request.metadata, context)
             self.guardian.version(record)
             self.telemetry.increment("memories_stored", level="1")
             return record
 
-    def search_memory(self, request: QueryRequest) -> dict[str, Any]:
+    def search_memory(self, request: QueryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="1", operation="search_memory"):
-            return self.memory.search(request.query, request.limit)
+            return self.memory.search(request.query, request.limit, context)
 
-    def validate_memory(self, request: MemoryRequest) -> dict[str, Any]:
+    def validate_memory(self, request: MemoryRequest, context: TenantContext) -> dict[str, Any]:
         with self.telemetry.timer("level_operation", level="2", operation="validate_memory"):
-            candidate = self.memory.store(request.content, request.memory_type, request.metadata)
+            candidate = self.memory.store(request.content, request.memory_type, request.metadata, context)
             result = self.guardian.validate(candidate, list(self.memory.records.values()))
             self.telemetry.increment("memory_reviews", level="2")
             return result

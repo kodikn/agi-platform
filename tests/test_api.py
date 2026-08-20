@@ -53,3 +53,24 @@ def test_orchestrator_includes_best_of_breed_capabilities():
     assert "workflow_graph" in body["competitive_capabilities"]
     assert "crew_flow" in body["competitive_capabilities"]
     assert "production_backend" in body["competitive_capabilities"]
+
+
+def test_tool_registry_exposes_governed_contracts():
+    response = client.get("/tools")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] >= 5
+    sandbox = next(tool for tool in body["tools"] if tool["name"] == "sandbox.execute")
+    assert sandbox["side_effects"] is True
+    assert sandbox["risk"] == "high"
+    assert "sandbox:execute" in sandbox["permissions"]
+
+
+def test_mcp_manifest_lists_approved_tools():
+    response = client.get("/mcp/manifest")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["protocol"] == "mcp-compatible"
+    assert body["capabilities"]["tools"] is True
+    names = {tool["name"] for tool in body["tools"]}
+    assert {"memory.search", "research.report", "sandbox.execute"}.issubset(names)

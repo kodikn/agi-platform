@@ -54,6 +54,12 @@ The API exposes concrete endpoints for every platform level.
 - `POST /evolution/evaluate`
 - `POST /evolution/proposals`
 
+## Tool and Agent Integration
+- `GET /tools`
+  - Returns versionable tool contracts with level ownership, input/output schemas, permissions, side-effect flags, and risk classes.
+- `GET /mcp/manifest`
+  - Returns an MCP-compatible tool manifest that agents can use to discover approved platform capabilities.
+
 ## Production Operations
 - `GET /ready`
 - `GET /architecture/readiness`

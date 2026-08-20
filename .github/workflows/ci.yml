@@ -34,7 +34,7 @@ jobs:
           image: agi-platform:${{ github.sha }}
           output-file: sbom.spdx.json
       - name: Container vulnerability scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           image-ref: agi-platform:${{ github.sha }}
           format: sarif

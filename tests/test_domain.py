@@ -5,9 +5,9 @@ from agi_platform.domain import (
     DomainStateError,
     Event,
     EventType,
-    ToolPermission,
     Task,
     TaskState,
+    ToolPermission,
     Workflow,
     WorkflowState,
 )
@@ -68,7 +68,11 @@ def test_workflow_transition_returns_actor_attributed_audit_event():
     assert event.workflow_id == "wf_2"
     assert event.actor_id == "user_1"
     assert event.correlation_id == "corr_2"
-    assert event.payload == {"from_state": "CREATED", "to_state": "PLANNED", "entity_version": 2}
+    assert event.payload == {
+        "from_state": "CREATED",
+        "to_state": "PLANNED",
+        "entity_version": 2,
+    }
 
 
 def test_task_transition_uses_optimistic_concurrency():
@@ -78,7 +82,13 @@ def test_task_transition_uses_optimistic_concurrency():
 
 
 def test_tool_permission_is_tenant_scoped_domain_object():
-    permission = ToolPermission(id="perm_1", tenant_id="tenant_a", tool_id="tool_1", capability="sandbox:execute", risk_level="HIGH")
+    permission = ToolPermission(
+        id="perm_1",
+        tenant_id="tenant_a",
+        tool_id="tool_1",
+        capability="sandbox:execute",
+        risk_level="HIGH",
+    )
     assert permission.tenant_id == "tenant_a"
     assert permission.action == "execute"
     assert permission.version == 1
